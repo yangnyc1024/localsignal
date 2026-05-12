@@ -41,21 +41,17 @@ npm run dev
 Backend:
 
 ```bash
+make setup-python
 cd services/api
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+../../.venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
 Signal engine:
 
 ```bash
+make setup-python
 cd services/engine
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m localsignal_engine.run_demo
+../../.venv/bin/python -m localsignal_engine.run_demo
 ```
 
 ## MVP Flow

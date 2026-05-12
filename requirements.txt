@@ -1,0 +1,2 @@
+-r services/api/requirements.txt
+-r services/engine/requirements.txt
