@@ -7,4 +7,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY localsignal_engine ./localsignal_engine
 
-CMD ["python", "-m", "localsignal_engine.run_demo"]
+CMD ["python", "-m", "localsignal_engine.run_batch"]

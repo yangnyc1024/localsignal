@@ -15,10 +15,7 @@ const actions = [
 
 export function SignalActions({ signalId }: Props) {
   async function sendFeedback(eventType: string) {
-    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-    if (!baseUrl) {
-      return;
-    }
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
     await fetch(`${baseUrl}/feedback`, {
       method: "POST",

@@ -6,7 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import get_connection
-from app.models import FeedbackCreate, FeedbackDTO, ReportDTO, SignalDTO
+from app.models import (
+    FeedbackCreate,
+    FeedbackDTO,
+    ReportDTO,
+    SignalDTO,
+    SubscriberCreate,
+    SubscriberDTO,
+)
 
 app = FastAPI(
     title="LocalSignal API",
@@ -120,6 +127,25 @@ def create_feedback(payload: FeedbackCreate, conn=Depends(get_connection)) -> di
         RETURNING id, signal_id, event_type, session_id
         """,
         (payload.signal_id, payload.event_type, payload.session_id),
+    ).fetchone()
+    conn.commit()
+    return row
+
+
+@app.post("/subscribers", response_model=SubscriberDTO, status_code=status.HTTP_201_CREATED)
+def create_subscriber(payload: SubscriberCreate, conn=Depends(get_connection)) -> dict:
+    row = conn.execute(
+        """
+        INSERT INTO subscribers (email, region, status, updated_at)
+        VALUES (%s, %s, 'active', now())
+        ON CONFLICT (email)
+        DO UPDATE SET
+          region = EXCLUDED.region,
+          status = 'active',
+          updated_at = now()
+        RETURNING id, email, region, status
+        """,
+        (payload.email, payload.region),
     ).fetchone()
     conn.commit()
     return row

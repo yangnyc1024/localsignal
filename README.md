@@ -54,6 +54,39 @@ cd services/engine
 ../../.venv/bin/python -m localsignal_engine.run_demo
 ```
 
+Generate the weekly report into Postgres:
+
+```bash
+make report
+```
+
+## Email Subscriptions
+
+The MVP includes a weekly email subscription capture flow:
+
+- frontend form on the main feed
+- `POST /subscribers`
+- `subscribers` table with active/unsubscribed status
+
+It stores subscribers but does not send email yet. A production sender such as Resend, Postmark, or SES should be added behind a weekly digest job.
+
+## Ingestion Status
+
+The repo now has an ingestion adapter boundary at `services/engine/localsignal_engine/ingestion`.
+
+Current support:
+
+- sample mentions for demo reports
+- local JSON mention imports
+
+Not included yet:
+
+- automatic Google/Yelp crawling
+- TikTok/Instagram/Xiaohongshu ingestion
+- real Reddit API integration
+
+Those should be added as source-specific adapters rather than hidden inside the scoring code.
+
 ## MVP Flow
 
 ```txt

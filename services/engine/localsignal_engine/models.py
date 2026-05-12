@@ -18,6 +18,7 @@ class Mention:
     source: str
     body: str
     occurred_at: datetime
+    source_url: Optional[str] = None
     author_region: Optional[str] = None
     rating: Optional[float] = None
     sentiment: Optional[float] = None

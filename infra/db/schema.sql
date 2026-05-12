@@ -48,6 +48,15 @@ CREATE TABLE IF NOT EXISTS reports (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS subscribers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL UNIQUE,
+  region TEXT NOT NULL DEFAULT 'Fort Lee / Edgewater / Palisades Park',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'unsubscribed')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS report_signals (
   report_id UUID NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
   signal_id UUID NOT NULL REFERENCES signals(id) ON DELETE CASCADE,
@@ -66,3 +75,6 @@ CREATE TABLE IF NOT EXISTS feedback_events (
 CREATE INDEX IF NOT EXISTS idx_mentions_place_time ON mentions(place_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_week_score ON signals(week_start DESC, score DESC);
 CREATE INDEX IF NOT EXISTS idx_reports_week ON reports(week_start DESC);
+CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_place_type_week ON signals(place_id, signal_type, week_start);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_region_week ON reports(region, week_start);

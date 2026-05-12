@@ -1,5 +1,6 @@
 import { CalendarDays, Radar, TrendingUp } from "lucide-react";
 
+import { SubscribeForm } from "@/components/SubscribeForm";
 import { SignalCard } from "@/components/SignalCard";
 import { getLatestReport } from "@/lib/api";
 
@@ -21,16 +22,19 @@ export default async function Home() {
             <p className="mt-4 max-w-2xl text-base leading-7 text-ink/75 md:text-lg">{report.intro}</p>
           </div>
 
-          <div className="rounded-lg border border-line bg-white/88 p-4 shadow-sm">
-            <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-              <CalendarDays size={16} />
-              Week of {formatDate(report.week_start)}
+          <div className="grid gap-3">
+            <div className="rounded-lg border border-line bg-white/88 p-4 shadow-sm">
+              <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+                <CalendarDays size={16} />
+                Week of {formatDate(report.week_start)}
+              </div>
+              <div className="mt-3 text-sm leading-6 text-ink/65">{report.region}</div>
+              <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-moss">
+                <TrendingUp size={16} />
+                {report.signals.length} signals ranked
+              </div>
             </div>
-            <div className="mt-3 text-sm leading-6 text-ink/65">{report.region}</div>
-            <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-moss">
-              <TrendingUp size={16} />
-              {report.signals.length} signals ranked
-            </div>
+            <SubscribeForm />
           </div>
         </header>
 
