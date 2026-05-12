@@ -9,6 +9,7 @@ from app.db import get_connection
 from app.models import (
     FeedbackCreate,
     FeedbackDTO,
+    EmailDeliveryDTO,
     ReportDTO,
     SignalDTO,
     SubscriberCreate,
@@ -149,6 +150,25 @@ def create_subscriber(payload: SubscriberCreate, conn=Depends(get_connection)) -
     ).fetchone()
     conn.commit()
     return row
+
+
+@app.get("/email-deliveries", response_model=list[EmailDeliveryDTO])
+def list_email_deliveries(conn=Depends(get_connection)) -> list[dict]:
+    return conn.execute(
+        """
+        SELECT
+          id,
+          recipient_email,
+          subject,
+          status,
+          provider,
+          error,
+          created_at::text AS created_at
+        FROM email_deliveries
+        ORDER BY created_at DESC
+        LIMIT 50
+        """
+    ).fetchall()
 
 
 @app.options("/{path:path}")

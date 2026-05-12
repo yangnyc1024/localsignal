@@ -64,3 +64,13 @@ class SubscriberDTO(BaseModel):
     email: str
     region: str
     status: str
+
+
+class EmailDeliveryDTO(BaseModel):
+    id: UUID
+    recipient_email: str
+    subject: str
+    status: str
+    provider: str
+    error: Optional[str] = None
+    created_at: str

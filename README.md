@@ -60,6 +60,14 @@ Generate the weekly report into Postgres:
 make report
 ```
 
+Run the local weekly scheduler:
+
+```bash
+make scheduler
+```
+
+In Docker Compose, the `scheduler` service runs the same weekly cycle. By default it runs once on start and then every 604800 seconds.
+
 ## Email Subscriptions
 
 The MVP includes a weekly email subscription capture flow:
@@ -69,6 +77,7 @@ The MVP includes a weekly email subscription capture flow:
 - `subscribers` table with active/unsubscribed status
 
 It stores subscribers but does not send email yet. A production sender such as Resend, Postmark, or SES should be added behind a weekly digest job.
+The current implementation supports Resend when `RESEND_API_KEY` and `EMAIL_FROM` are configured. Without an API key, deliveries are stored as `dry_run` rows in `email_deliveries`.
 
 ## Ingestion Status
 

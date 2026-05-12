@@ -40,6 +40,20 @@ services:
     profiles:
       - jobs
 
+  scheduler:
+    build:
+      context: ./services/engine
+    command: ["python", "-m", "localsignal_engine.scheduler"]
+    environment:
+      DATABASE_URL: postgresql://localsignal:localsignal@db:5432/localsignal
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-LocalSignal <digest@localsignal.local>}
+      WEEKLY_INTERVAL_SECONDS: ${WEEKLY_INTERVAL_SECONDS:-604800}
+      WEEKLY_RUN_ON_START: ${WEEKLY_RUN_ON_START:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+
   web:
     build:
       context: ./apps/web

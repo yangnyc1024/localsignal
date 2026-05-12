@@ -6,7 +6,7 @@ PIP_CACHE_DIR := .pip-cache
 export PYTHONPYCACHEPREFIX
 export PIP_CACHE_DIR
 
-.PHONY: dev up down setup-python api engine report web
+.PHONY: dev up down setup-python api engine report scheduler web
 
 dev: up
 
@@ -28,7 +28,10 @@ engine:
 	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_demo
 
 report:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_batch
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_weekly
+
+scheduler:
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.scheduler
 
 web:
 	cd apps/web && npm run dev

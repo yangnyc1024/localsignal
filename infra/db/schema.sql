@@ -57,6 +57,20 @@ CREATE TABLE IF NOT EXISTS subscribers (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS email_deliveries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subscriber_id UUID NOT NULL REFERENCES subscribers(id) ON DELETE CASCADE,
+  report_id UUID NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+  recipient_email TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('dry_run', 'sent', 'failed')),
+  provider TEXT NOT NULL DEFAULT 'local',
+  provider_message_id TEXT,
+  error TEXT,
+  body_preview TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS report_signals (
   report_id UUID NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
   signal_id UUID NOT NULL REFERENCES signals(id) ON DELETE CASCADE,
@@ -78,3 +92,4 @@ CREATE INDEX IF NOT EXISTS idx_reports_week ON reports(week_start DESC);
 CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_place_type_week ON signals(place_id, signal_type, week_start);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_region_week ON reports(region, week_start);
+CREATE INDEX IF NOT EXISTS idx_email_deliveries_report ON email_deliveries(report_id, created_at DESC);
