@@ -34,6 +34,9 @@ services:
       context: ./services/engine
     environment:
       DATABASE_URL: postgresql://localsignal:localsignal@db:5432/localsignal
+      REDDIT_SUBREDDITS: ${REDDIT_SUBREDDITS:-newjersey}
+      RSS_FEED_URLS: ${RSS_FEED_URLS:-}
+      INGESTION_FALLBACK_TO_SAMPLE: ${INGESTION_FALLBACK_TO_SAMPLE:-true}
     depends_on:
       db:
         condition: service_healthy
@@ -48,6 +51,9 @@ services:
       DATABASE_URL: postgresql://localsignal:localsignal@db:5432/localsignal
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-LocalSignal <digest@localsignal.local>}
+      REDDIT_SUBREDDITS: ${REDDIT_SUBREDDITS:-newjersey}
+      RSS_FEED_URLS: ${RSS_FEED_URLS:-}
+      INGESTION_FALLBACK_TO_SAMPLE: ${INGESTION_FALLBACK_TO_SAMPLE:-true}
       WEEKLY_INTERVAL_SECONDS: ${WEEKLY_INTERVAL_SECONDS:-604800}
       WEEKLY_RUN_ON_START: ${WEEKLY_RUN_ON_START:-true}
     depends_on:

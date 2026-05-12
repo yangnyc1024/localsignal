@@ -79,6 +79,21 @@ The MVP includes a weekly email subscription capture flow:
 It stores subscribers but does not send email yet. A production sender such as Resend, Postmark, or SES should be added behind a weekly digest job.
 The current implementation supports Resend when `RESEND_API_KEY` and `EMAIL_FROM` are configured. Without an API key, deliveries are stored as `dry_run` rows in `email_deliveries`.
 
+To send real email with Resend:
+
+```bash
+RESEND_API_KEY=re_xxx
+EMAIL_FROM=LocalSignal <onboarding@resend.dev>
+```
+
+Then run:
+
+```bash
+make send-digest
+```
+
+In Docker Compose, set the same environment variables in `.env` before starting `scheduler`.
+
 ## Ingestion Status
 
 The repo now has an ingestion adapter boundary at `services/engine/localsignal_engine/ingestion`.
@@ -87,14 +102,22 @@ Current support:
 
 - sample mentions for demo reports
 - local JSON mention imports
+- Reddit public JSON search via `REDDIT_SUBREDDITS`
+- RSS/Atom local blog ingestion via `RSS_FEED_URLS`
 
 Not included yet:
 
 - automatic Google/Yelp crawling
 - TikTok/Instagram/Xiaohongshu ingestion
-- real Reddit API integration
 
 Those should be added as source-specific adapters rather than hidden inside the scoring code.
+
+Example live ingestion config:
+
+```bash
+REDDIT_SUBREDDITS=newjersey,bergencounty
+RSS_FEED_URLS=https://example-local-blog.com/feed.xml,https://another-site.com/rss
+```
 
 ## MVP Flow
 

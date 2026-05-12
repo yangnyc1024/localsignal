@@ -3,6 +3,7 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from html import escape
 from typing import Optional
 from uuid import UUID
 
@@ -226,19 +227,19 @@ def _render_html(report: Report) -> str:
     items = "\n".join(
         f"""
         <li>
-          <h2>{signal.title}</h2>
-          <p><strong>{signal.place_name}</strong> · {signal.city} · score {signal.score:.1f}</p>
-          <p>{signal.summary}</p>
+          <h2>{escape(signal.title)}</h2>
+          <p><strong>{escape(signal.place_name)}</strong> · {escape(signal.city)} · score {signal.score:.1f}</p>
+          <p>{escape(signal.summary)}</p>
         </li>
         """
         for signal in report.signals
     )
     return f"""
     <main>
-      <h1>{report.title}</h1>
-      <p><strong>Week of {report.week_start}</strong></p>
-      <p>{report.region}</p>
-      <p>{report.intro}</p>
+      <h1>{escape(report.title)}</h1>
+      <p><strong>Week of {escape(report.week_start)}</strong></p>
+      <p>{escape(report.region)}</p>
+      <p>{escape(report.intro)}</p>
       <ol>{items}</ol>
     </main>
     """

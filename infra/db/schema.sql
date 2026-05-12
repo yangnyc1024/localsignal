@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS feedback_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mentions_place_time ON mentions(place_id, occurred_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mentions_place_source_url ON mentions(place_id, source_url) WHERE source_url IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_signals_week_score ON signals(week_start DESC, score DESC);
 CREATE INDEX IF NOT EXISTS idx_reports_week ON reports(week_start DESC);
 CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(status);
