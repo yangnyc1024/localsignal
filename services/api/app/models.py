@@ -74,3 +74,15 @@ class EmailDeliveryDTO(BaseModel):
     provider: str
     error: Optional[str] = None
     created_at: str
+
+
+class IngestionRunDTO(BaseModel):
+    id: UUID
+    status: str
+    source_counts: dict[str, int]
+    live_mentions_written: int
+    signals_generated: int
+    report_id: Optional[UUID] = None
+    error: Optional[str] = None
+    started_at: str
+    finished_at: Optional[str] = None

@@ -10,16 +10,18 @@ from localsignal_engine.ingestion.yelp import YelpFusionAdapter
 from localsignal_engine.models import Mention, Place
 
 
-def fetch_live_mentions(places: list[Place]) -> list[Mention]:
+def fetch_live_mentions(places: list[Place]) -> tuple[list[Mention], dict[str, int]]:
     adapters = _configured_adapters()
     mentions: list[Mention] = []
+    source_counts: dict[str, int] = {}
 
     for adapter in adapters:
         fetched = adapter.fetch_mentions(places)
         print(f"{adapter.source} produced {len(fetched)} mentions.", flush=True)
+        source_counts[adapter.source] = len(fetched)
         mentions.extend(fetched)
 
-    return mentions
+    return mentions, source_counts
 
 
 def _configured_adapters() -> list[IngestionAdapter]:

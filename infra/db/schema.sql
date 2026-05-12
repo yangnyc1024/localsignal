@@ -71,6 +71,18 @@ CREATE TABLE IF NOT EXISTS email_deliveries (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS ingestion_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed')),
+  source_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+  live_mentions_written INTEGER NOT NULL DEFAULT 0,
+  signals_generated INTEGER NOT NULL DEFAULT 0,
+  report_id UUID REFERENCES reports(id) ON DELETE SET NULL,
+  error TEXT,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS report_signals (
   report_id UUID NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
   signal_id UUID NOT NULL REFERENCES signals(id) ON DELETE CASCADE,
@@ -94,3 +106,4 @@ CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_place_type_week ON signals(place_id, signal_type, week_start);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_region_week ON reports(region, week_start);
 CREATE INDEX IF NOT EXISTS idx_email_deliveries_report ON email_deliveries(report_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ingestion_runs_started ON ingestion_runs(started_at DESC);

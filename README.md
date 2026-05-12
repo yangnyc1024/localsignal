@@ -10,7 +10,7 @@ LocalSignal is not a map or a review database. The MVP produces a weekly local i
 apps/web/             Next.js frontend for the weekly intelligence feed
 services/api/         FastAPI backend for places, signals, and weekly reports
 services/engine/      Python signal engine for extraction, scoring, and report generation
-infra/db/             PostgreSQL + pgvector schema and seed data
+infra/db/             PostgreSQL + pgvector schema and place seed data
 docs/                 Product and architecture notes
 docker-compose.yml    Local Postgres, API, engine, and web services
 ```
@@ -46,7 +46,7 @@ cd services/api
 ../../.venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
-Signal engine:
+Signal engine demo:
 
 ```bash
 make setup-python
@@ -54,7 +54,9 @@ cd services/engine
 ../../.venv/bin/python -m localsignal_engine.run_demo
 ```
 
-Generate the weekly report into Postgres:
+Demo data is isolated to explicit demo commands. The production scheduler does not use sample mentions.
+
+Generate the real weekly report into Postgres:
 
 ```bash
 make report
@@ -100,7 +102,6 @@ The repo now has an ingestion adapter boundary at `services/engine/localsignal_e
 
 Current support:
 
-- sample mentions for demo reports
 - local JSON mention imports
 - Reddit public JSON search via `REDDIT_SUBREDDITS`
 - RSS/Atom local blog ingestion via `RSS_FEED_URLS`
@@ -156,4 +157,4 @@ Mentions
 -> user feedback
 ```
 
-The current implementation includes deterministic sample data and scoring logic so the product can be reviewed before live data ingestion is wired in.
+The current implementation keeps deterministic sample data only for explicit demo commands. The weekly scheduler uses live/imported mentions and fails clearly if no real signals can be generated.

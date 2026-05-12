@@ -11,6 +11,61 @@ from localsignal_engine.models import Mention, Place, Signal
 DEFAULT_REGION = "Fort Lee / Edgewater / Palisades Park"
 
 
+def start_ingestion_run() -> UUID:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is required to start ingestion run.")
+    with psycopg.connect(database_url) as conn:
+        row = conn.execute(
+            """
+            INSERT INTO ingestion_runs (status)
+            VALUES ('started')
+            RETURNING id
+            """
+        ).fetchone()
+        conn.commit()
+    return row[0]
+
+
+def finish_ingestion_run(
+    run_id: UUID,
+    status: str,
+    source_counts: dict[str, int],
+    live_mentions_written: int,
+    signals_generated: int,
+    report_id: UUID | None = None,
+    error: str | None = None,
+) -> None:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is required to finish ingestion run.")
+    with psycopg.connect(database_url) as conn:
+        conn.execute(
+            """
+            UPDATE ingestion_runs
+            SET
+              status = %s,
+              source_counts = %s::jsonb,
+              live_mentions_written = %s,
+              signals_generated = %s,
+              report_id = %s,
+              error = %s,
+              finished_at = now()
+            WHERE id = %s
+            """,
+            (
+                status,
+                Jsonb(source_counts),
+                live_mentions_written,
+                signals_generated,
+                report_id,
+                error,
+                run_id,
+            ),
+        )
+        conn.commit()
+
+
 def load_places() -> list[Place]:
     database_url = os.getenv("DATABASE_URL")
     if not database_url:

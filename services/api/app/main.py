@@ -11,6 +11,7 @@ from app.models import (
     FeedbackDTO,
     EmailDeliveryDTO,
     ReportDTO,
+    IngestionRunDTO,
     SignalDTO,
     SubscriberCreate,
     SubscriberDTO,
@@ -166,6 +167,27 @@ def list_email_deliveries(conn=Depends(get_connection)) -> list[dict]:
           created_at::text AS created_at
         FROM email_deliveries
         ORDER BY created_at DESC
+        LIMIT 50
+        """
+    ).fetchall()
+
+
+@app.get("/ingestion-runs", response_model=list[IngestionRunDTO])
+def list_ingestion_runs(conn=Depends(get_connection)) -> list[dict]:
+    return conn.execute(
+        """
+        SELECT
+          id,
+          status,
+          source_counts,
+          live_mentions_written,
+          signals_generated,
+          report_id,
+          error,
+          started_at::text AS started_at,
+          finished_at::text AS finished_at
+        FROM ingestion_runs
+        ORDER BY started_at DESC
         LIMIT 50
         """
     ).fetchall()
