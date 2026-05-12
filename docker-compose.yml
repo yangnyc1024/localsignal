@@ -1,0 +1,55 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: localsignal
+      POSTGRES_USER: localsignal
+      POSTGRES_PASSWORD: localsignal
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./infra/db/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U localsignal -d localsignal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./services/api
+    environment:
+      DATABASE_URL: postgresql://localsignal:localsignal@db:5432/localsignal
+      CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  engine:
+    build:
+      context: ./services/engine
+    environment:
+      DATABASE_URL: postgresql://localsignal:localsignal@db:5432/localsignal
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - jobs
+
+  web:
+    build:
+      context: ./apps/web
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      INTERNAL_API_BASE_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
