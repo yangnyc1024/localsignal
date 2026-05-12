@@ -104,11 +104,14 @@ Current support:
 - local JSON mention imports
 - Reddit public JSON search via `REDDIT_SUBREDDITS`
 - RSS/Atom local blog ingestion via `RSS_FEED_URLS`
+- Google News RSS search via `GOOGLE_NEWS_ENABLED`
+- Yelp Fusion API via `YELP_API_KEY`
+- Google Places Text Search API via `GOOGLE_PLACES_API_KEY`
 
 Not included yet:
 
-- automatic Google/Yelp crawling
 - TikTok/Instagram/Xiaohongshu ingestion
+- direct Google/Yelp scraping
 
 Those should be added as source-specific adapters rather than hidden inside the scoring code.
 
@@ -117,6 +120,28 @@ Example live ingestion config:
 ```bash
 REDDIT_SUBREDDITS=newjersey,bergencounty
 RSS_FEED_URLS=https://example-local-blog.com/feed.xml,https://another-site.com/rss
+GOOGLE_NEWS_ENABLED=true
+YELP_API_KEY=yelp_xxx
+GOOGLE_PLACES_API_KEY=google_xxx
+```
+
+## ML Engine
+
+Weekly report generation now uses `localsignal_engine.ml_engine` instead of only static rules.
+
+It compares a current window against a baseline window:
+
+- mention velocity
+- keyword novelty
+- source diversity
+- simple sentiment estimation
+- outside-region pull
+
+Configure the analysis windows with:
+
+```bash
+ML_CURRENT_WINDOW_DAYS=7
+ML_BASELINE_WINDOW_DAYS=28
 ```
 
 ## MVP Flow

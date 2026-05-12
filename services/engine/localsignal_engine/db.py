@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import psycopg
@@ -78,6 +79,46 @@ def write_mentions(mentions: list[Mention]) -> int:
                     written += 1
         conn.commit()
     return written
+
+
+def load_recent_mentions(days: int = 35) -> list[Mention]:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is required to load mentions.")
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    with psycopg.connect(database_url) as conn:
+        rows = conn.execute(
+            """
+            SELECT
+              place_id::text,
+              source,
+              body,
+              occurred_at,
+              source_url,
+              author_region,
+              rating::float,
+              sentiment::float
+            FROM mentions
+            WHERE occurred_at >= %s
+            ORDER BY occurred_at DESC
+            """,
+            (since,),
+        ).fetchall()
+
+    return [
+        Mention(
+            place_id=row[0],
+            source=row[1],
+            body=row[2],
+            occurred_at=row[3],
+            source_url=row[4],
+            author_region=row[5],
+            rating=row[6],
+            sentiment=row[7],
+        )
+        for row in rows
+    ]
 
 
 def write_signals(signals: list[Signal]) -> list[UUID]:

@@ -11,8 +11,9 @@ from localsignal_engine.models import Mention, Place
 class RssAdapter(IngestionAdapter):
     source = "rss"
 
-    def __init__(self, feed_urls: list[str]) -> None:
+    def __init__(self, feed_urls: list[str], source: str = "rss") -> None:
         self.feed_urls = feed_urls
+        self.source = source
 
     def fetch_mentions(self, places: list[Place]) -> list[Mention]:
         mentions: list[Mention] = []
@@ -23,7 +24,7 @@ class RssAdapter(IngestionAdapter):
                 print(f"RSS fetch failed for {feed_url}: {exc}", flush=True)
                 continue
 
-            mentions.extend(_parse_feed(body, feed_url, places))
+            mentions.extend(_parse_feed(body, feed_url, places, self.source))
         return mentions
 
 
@@ -36,7 +37,7 @@ def _fetch(url: str) -> bytes:
         return response.read()
 
 
-def _parse_feed(body: bytes, feed_url: str, places: list[Place]) -> list[Mention]:
+def _parse_feed(body: bytes, feed_url: str, places: list[Place], source: str = "rss") -> list[Mention]:
     root = ET.fromstring(body)
     entries = root.findall(".//item") or root.findall("{http://www.w3.org/2005/Atom}entry")
     mentions: list[Mention] = []
@@ -54,7 +55,7 @@ def _parse_feed(body: bytes, feed_url: str, places: list[Place]) -> list[Mention
             mentions.append(
                 Mention(
                     place_id=place.id,
-                    source="rss",
+                    source=source,
                     source_url=link,
                     body=text,
                     author_region=place.city,

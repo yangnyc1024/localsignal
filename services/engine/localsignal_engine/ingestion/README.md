@@ -7,6 +7,8 @@ Current MVP-safe sources:
 1. `local_json`: manually exported or curated mentions.
 2. `reddit`: public JSON search for configured subreddits.
 3. `rss`: RSS/Atom local blog feeds.
-4. Review platform API/import adapter.
+4. `google_news`: Google News RSS search.
+5. `yelp_fusion`: Yelp Fusion API when `YELP_API_KEY` is configured.
+6. `google_places`: Google Places Text Search API when `GOOGLE_PLACES_API_KEY` is configured.
 
 Direct scraping of Google, Yelp, TikTok, Instagram, or Xiaohongshu should not be added here without a source-specific legal and product review.
