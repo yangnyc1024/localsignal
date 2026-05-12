@@ -154,6 +154,7 @@ def _send_email(recipient: str, subject: str, text_body: str, html_body: str) ->
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "User-Agent": "LocalSignal/0.1",
         },
     )
 
