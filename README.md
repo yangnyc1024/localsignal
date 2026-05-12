@@ -94,6 +94,12 @@ Then run:
 make send-digest
 ```
 
+To send a Resend smoke-test email:
+
+```bash
+TEST_EMAIL_TO=linyangnyc@gmail.com make send-test-email
+```
+
 In Docker Compose, set the same environment variables in `.env` before starting `scheduler`.
 
 ## Ingestion Status
