@@ -38,7 +38,7 @@ export function SubscribeForm() {
     <form onSubmit={onSubmit} className="rounded-lg border border-line bg-white/88 p-4 shadow-sm">
       <label htmlFor="email" className="flex items-center gap-2 text-sm font-semibold text-ink">
         <MailCheck size={16} />
-        Weekly email
+        Get the top food signals every week.
       </label>
       <div className="mt-3 flex gap-2">
         <input

@@ -1,12 +1,15 @@
 import { Radar } from "lucide-react";
 
-import { LocalBriefing } from "@/components/LocalBriefing";
-import { getLatestReport } from "@/lib/api";
+import { AlwaysHot } from "@/components/AlwaysHot";
+import { CategoryWatch } from "@/components/CategoryWatch";
+import { DashboardOverview } from "@/components/DashboardOverview";
+import { SignalFeed } from "@/components/SignalFeed";
+import { getAlwaysHotPlaces, getLatestReport } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const report = await getLatestReport();
+  const [report, alwaysHotPlaces] = await Promise.all([getLatestReport(), getAlwaysHotPlaces()]);
 
   if (!report) {
     return (
@@ -29,7 +32,12 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen">
-      <LocalBriefing report={report} />
+      <section className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-8 md:py-8">
+        <DashboardOverview report={report} />
+        <AlwaysHot places={alwaysHotPlaces} signals={report.signals} />
+        <CategoryWatch signals={report.signals} />
+        <SignalFeed signals={report.signals} />
+      </section>
     </main>
   );
 }
