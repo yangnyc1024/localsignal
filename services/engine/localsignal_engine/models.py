@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 from typing import Optional
 
 
@@ -10,6 +11,10 @@ class Place:
     category: str
     city: str
     neighborhood: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    google_place_id: Optional[str] = None
+    map_url: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,9 @@ class Mention:
     author_region: Optional[str] = None
     rating: Optional[float] = None
     sentiment: Optional[float] = None
+    engagement_metrics: dict[str, Any] = field(default_factory=dict)
+    geo_metadata: dict[str, Any] = field(default_factory=dict)
+    raw_json: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

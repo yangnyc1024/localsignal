@@ -1,15 +1,22 @@
 import os
 
+import psycopg
+
+from localsignal_engine.baseline import compute_baseline_profiles
 from localsignal_engine.db import (
     finish_ingestion_run,
+    link_evidence_chunks_to_signals,
     load_places,
     load_recent_mentions,
     start_ingestion_run,
     write_mentions,
+    write_raw_source_items_from_mentions,
+    write_social_metadata_items,
     write_weekly_report,
 )
 from localsignal_engine.email import send_latest_digest
-from localsignal_engine.ingestion.live import fetch_live_mentions
+from localsignal_engine.ingestion.live import fetch_live_mentions, fetch_social_metadata_items
+from localsignal_engine.llm import enrich_report_signals_with_llm
 from localsignal_engine.ml_engine import generate_report_signals
 
 
@@ -22,8 +29,19 @@ def run_once() -> None:
 
     places = load_places()
     try:
+        social_items, social_source_counts = fetch_social_metadata_items(places)
+        (
+            social_raw_count,
+            social_mentions_count,
+            social_chunk_count,
+            social_review_count,
+            social_unresolved_count,
+        ) = write_social_metadata_items(social_items)
+
         mentions, source_counts = fetch_live_mentions(places)
+        source_counts = {**social_source_counts, **source_counts}
         written_count = write_mentions(mentions)
+        raw_count, chunk_count = write_raw_source_items_from_mentions(mentions)
 
         if not mentions and _fallback_to_sample():
             raise RuntimeError("Sample fallback has been removed from the production weekly job.")
@@ -40,7 +58,10 @@ def run_once() -> None:
             raise RuntimeError("No signals generated from live ingestion.")
 
         report_id = write_weekly_report(signals)
-        delivery_count = send_latest_digest()
+        linked_count = link_evidence_chunks_to_signals()
+        baseline_count = _compute_baselines(places)
+        llm_metrics = enrich_report_signals_with_llm(report_id) if _llm_enrichment_enabled() else {"enabled": False}
+        delivery_count = send_latest_digest() if _send_digest_enabled() else 0
         finish_ingestion_run(
             run_id=run_id,
             status="succeeded",
@@ -50,7 +71,13 @@ def run_once() -> None:
             report_id=report_id,
         )
         print(
-            f"Wrote report {report_id}, stored {written_count} live mentions, and queued {delivery_count} digest deliveries."
+            f"Wrote report {report_id}, stored {written_count} live mentions, {raw_count} raw source items, "
+            f"{chunk_count} evidence chunks, imported {social_raw_count} social raw items, "
+            f"{social_mentions_count} social mentions, {social_chunk_count} social evidence chunks, "
+            f"{social_review_count} social review items, {social_unresolved_count} unresolved social items, "
+            f"linked {linked_count} evidence rows, updated {baseline_count} baselines, "
+            f"LLM enrichment {llm_metrics}, "
+            f"and queued {delivery_count} digest deliveries."
         )
     except Exception as exc:
         finish_ingestion_run(
@@ -75,6 +102,22 @@ def _current_window_days() -> int:
 
 def _baseline_window_days() -> int:
     return int(os.getenv("ML_BASELINE_WINDOW_DAYS", "28"))
+
+
+def _send_digest_enabled() -> bool:
+    return os.getenv("SEND_DIGEST_ENABLED", "false").lower() == "true"
+
+
+def _llm_enrichment_enabled() -> bool:
+    return os.getenv("LLM_ENRICH_WEEKLY", "true").lower() == "true"
+
+
+def _compute_baselines(places) -> int:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return 0
+    with psycopg.connect(database_url) as conn:
+        return compute_baseline_profiles(conn, places)
 
 
 def main() -> None:

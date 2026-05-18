@@ -11,13 +11,21 @@ STOPWORDS = {
     "after",
     "again",
     "also",
+    "always",
+    "all",
     "and",
     "are",
+    "author",
+    "any",
     "because",
     "been",
     "but",
+    "can",
+    "day",
     "for",
     "from",
+    "get",
+    "had",
     "has",
     "have",
     "into",
@@ -29,15 +37,33 @@ STOPWORDS = {
     "not",
     "now",
     "one",
+    "ordered",
     "our",
     "out",
+    "over",
+    "place",
+    "relative",
+    "she",
+    "still",
+    "time",
     "the",
     "their",
     "there",
+    "that",
+    "they",
     "this",
+    "very",
+    "week",
+    "were",
     "was",
+    "when",
+    "whatever",
+    "which",
+    "will",
     "with",
+    "would",
     "you",
+    "your",
 }
 
 POSITIVE_TERMS = {
@@ -207,14 +233,15 @@ def _score(
     sentiment_delta: float,
     outside_region_count: int,
 ) -> float:
-    return (
-        min(current_count * 8, 32)
-        + min(source_count * 12, 30)
-        + min(keyword_count * 5, 20)
-        + min(velocity_ratio * 10, 30)
-        + min(abs(sentiment_delta) * 35, 14)
-        + min(outside_region_count * 5, 10)
+    score = (
+        min(current_count * 7, 28)
+        + min(source_count * 10, 30)
+        + min(keyword_count * 4, 16)
+        + min(math.log1p(velocity_ratio) * 8, 22)
+        + min(abs(sentiment_delta) * 28, 10)
+        + min(outside_region_count * 4, 8)
     )
+    return min(score, 100)
 
 
 def _explain(
@@ -226,22 +253,54 @@ def _explain(
     source_count: int,
 ) -> tuple[str, str]:
     keyword_text = ", ".join(keywords[:3]) if keywords else "recent mentions"
+    topic = _title_topic(keywords, place.category)
+    area = place.neighborhood or place.city
     if signal_type == "sentiment_shift":
         return (
-            f"{place.name} sentiment is shifting",
-            f"ML signals show a sentiment move of {sentiment_delta:+.2f}, with language clustering around {keyword_text}.",
+            f"Wait-time talk is shifting at {place.name}" if topic == "Wait-time" else f"{topic} tone is shifting at {place.name}",
+            f"Recent language around {keyword_text} is moving differently from the short-term baseline.",
         )
     if signal_type == "behavior_shift":
         return (
-            f"{place.name} is showing a new usage pattern",
+            f"{topic} use is changing at {place.name}",
             f"Recent mentions across {source_count} source(s) increasingly point to {keyword_text}.",
         )
     if signal_type == "review_velocity_spike":
+        if source_count >= 3:
+            return (
+                f"{topic} is spreading across multiple source types at {place.name}",
+                f"Recent activity is appearing across {source_count} source types, with repeated language around {keyword_text}.",
+            )
+        if velocity_ratio >= 5:
+            return (
+                f"{topic} keeps coming up at {place.name}",
+                f"Recent mentions are materially above the short-term baseline, led by language around {keyword_text}.",
+            )
         return (
-            f"{place.name} is gaining momentum",
-            f"Mention velocity is running about {velocity_ratio:.1f}x baseline, with new keywords around {keyword_text}.",
+            f"{topic} activity is picking up at {place.name}",
+            f"Recent activity is moving ahead of baseline, with new keywords around {keyword_text}.",
         )
     return (
-        f"{place.name} has a keyword spike",
+        f"{topic} is becoming the repeated clue at {place.name}",
         f"The strongest new language this week centers on {keyword_text}, across {source_count} source(s).",
     )
+
+
+def _title_topic(keywords: list[str], category: str) -> str:
+    allowed_terms = {
+        "line", "wait", "wait time", "sold out", "worth the drive", "viral", "new menu",
+        "opening", "soft opening", "reservation", "packed", "quiet work spot", "late night",
+        "pizza", "sourdough", "bread", "pastry", "croissant", "bun", "cake", "dessert",
+        "matcha", "cream", "coffee", "latte", "seafood", "crab", "chicken wings", "wings",
+        "bbq", "korean bbq", "ramen", "sushi", "gyro", "kebab", "falafel", "empanadas",
+    }
+    normalized = [keyword.strip().lower() for keyword in keywords if keyword and keyword.strip()]
+    useful = [keyword for keyword in normalized if keyword in allowed_terms]
+    if "chicken" in normalized and "wings" in normalized and "chicken wings" not in useful:
+        useful.insert(0, "chicken wings")
+    if useful:
+        label_map = {"wait": "Wait-time", "wait time": "Wait-time", "late night": "Late-night", "chicken wings": "Chicken wings"}
+        return label_map.get(useful[0], " ".join(word.capitalize() for word in useful[0].split()))
+    if category:
+        return category.replace("_", " ").title()
+    return "Food"

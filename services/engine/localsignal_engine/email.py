@@ -1,9 +1,11 @@
 import json
 import os
+import urllib.parse
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from html import escape
+from typing import Any
 from typing import Optional
 from uuid import UUID
 
@@ -23,6 +25,12 @@ class ReportSignal:
     city: str
     score: float
     place_name: str
+    place_category: str
+    place_neighborhood: Optional[str]
+    signal_type: str
+    evidence: dict
+    confidence_level: Optional[str]
+    momentum_driver: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -32,6 +40,7 @@ class Report:
     region: str
     week_start: str
     intro: str
+    briefing: dict[str, Any]
     signals: list[ReportSignal]
 
 
@@ -67,7 +76,7 @@ def send_latest_digest() -> int:
 def _latest_report(conn) -> Report:
     row = conn.execute(
         """
-        SELECT id, title, region, week_start::text AS week_start, intro
+        SELECT id, title, region, week_start::text AS week_start, intro, briefing
         FROM reports
         ORDER BY week_start DESC, created_at DESC
         LIMIT 1
@@ -83,7 +92,13 @@ def _latest_report(conn) -> Report:
           s.summary,
           s.city,
           s.score::float AS score,
-          p.name AS place_name
+          p.name AS place_name,
+          p.category AS place_category,
+          p.neighborhood AS place_neighborhood,
+          s.signal_type,
+          s.evidence,
+          s.confidence_level,
+          COALESCE(s.short_summary, s.summary) AS momentum_driver
         FROM report_signals rs
         JOIN signals s ON s.id = rs.signal_id
         JOIN places p ON p.id = s.place_id
@@ -99,6 +114,7 @@ def _latest_report(conn) -> Report:
         region=row[2],
         week_start=row[3],
         intro=row[4],
+        briefing=row[5] or {},
         signals=[
             ReportSignal(
                 title=signal[0],
@@ -106,6 +122,12 @@ def _latest_report(conn) -> Report:
                 city=signal[2],
                 score=signal[3],
                 place_name=signal[4],
+                place_category=signal[5],
+                place_neighborhood=signal[6],
+                signal_type=signal[7],
+                evidence=signal[8] or {},
+                confidence_level=signal[9],
+                momentum_driver=signal[10],
             )
             for signal in signal_rows
         ],
@@ -204,6 +226,29 @@ def _record_delivery(
 
 
 def _render_text(report: Report) -> str:
+    if _has_briefing(report):
+        briefing = report.briefing
+        lines = [
+            str(briefing["title"]),
+            f"Week of {report.week_start}",
+            report.region,
+            "",
+            str(briefing["subtitle"]),
+            "",
+            "Why it matters",
+            str(briefing["why_it_matters"]),
+            "",
+            "Places involved",
+        ]
+        for place in briefing.get("places_involved") or []:
+            lines.append(f"- {place.get('name')} · {place.get('area')}: {place.get('reason')}")
+        supporting = briefing.get("supporting_reads") or []
+        if supporting:
+            lines.extend(["", "Also worth noting"])
+            for read in supporting:
+                lines.append(f"- {read.get('title')}: {read.get('summary')}")
+        return "\n".join(lines).strip()
+
     lines = [
         report.title,
         f"Week of {report.week_start}",
@@ -211,13 +256,18 @@ def _render_text(report: Report) -> str:
         "",
         report.intro,
         "",
+        _briefing_summary(report),
+        "",
+        "Category watch",
+        *_category_status_text(report),
+        "",
     ]
     for index, signal in enumerate(report.signals, start=1):
         lines.extend(
             [
                 f"{index}. {signal.title}",
                 f"{signal.place_name} · {signal.city} · score {signal.score:.1f}",
-                signal.summary,
+                signal.momentum_driver or signal.summary,
                 "",
             ]
         )
@@ -225,22 +275,300 @@ def _render_text(report: Report) -> str:
 
 
 def _render_html(report: Report) -> str:
+    if _has_briefing(report):
+        return _render_briefing_html(report)
+
     items = "\n".join(
         f"""
-        <li>
-          <h2>{escape(signal.title)}</h2>
-          <p><strong>{escape(signal.place_name)}</strong> · {escape(signal.city)} · score {signal.score:.1f}</p>
-          <p>{escape(signal.summary)}</p>
-        </li>
+        <article style="margin:0 0 14px 0;padding:22px;border:1px solid #ddd4c6;border-radius:8px;background:rgba(255,255,255,0.92);box-shadow:0 1px 2px rgba(22,32,29,0.06);">
+          <div style="font-size:12px;line-height:18px;font-weight:700;text-transform:uppercase;color:#4f6b5d;">
+            #{index} &nbsp; {escape(_label_for(signal.signal_type))} &nbsp; {escape(signal.city)}
+          </div>
+          <h2 style="margin:10px 0 0 0;font-size:23px;line-height:29px;font-weight:700;color:#16201d;">{escape(signal.title)}</h2>
+          <p style="margin:12px 0 0 0;font-size:15px;line-height:24px;color:rgba(22,32,29,0.74);">{escape(signal.momentum_driver or signal.summary)}</p>
+          <p style="margin:8px 0 0 0;font-size:13px;line-height:20px;color:rgba(22,32,29,0.58);">{escape(_evidence_assessment(signal))}</p>
+
+          <div style="margin-top:18px;padding:14px;border-radius:7px;background:#f7f3eb;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+              <tr>
+                <td style="padding:0 12px 0 0;vertical-align:top;">
+                  <div style="font-size:11px;line-height:16px;font-weight:700;text-transform:uppercase;color:rgba(22,32,29,0.48);">Place</div>
+                  <div style="margin-top:3px;font-size:15px;line-height:21px;font-weight:700;color:#16201d;">{escape(signal.place_name)}</div>
+                  <div style="margin-top:2px;font-size:13px;line-height:19px;text-transform:capitalize;color:rgba(22,32,29,0.66);">{escape(signal.place_category)}</div>
+                </td>
+                <td style="padding:0 12px;vertical-align:top;">
+                  <div style="font-size:11px;line-height:16px;font-weight:700;text-transform:uppercase;color:rgba(22,32,29,0.48);">Area</div>
+                  <div style="margin-top:3px;font-size:14px;line-height:21px;color:#16201d;">{escape(signal.place_neighborhood or signal.city)}</div>
+                </td>
+                <td align="right" style="padding:0;vertical-align:top;">
+                  <div style="font-size:11px;line-height:16px;font-weight:700;text-transform:uppercase;color:rgba(22,32,29,0.48);">Score</div>
+                  <div style="margin-top:3px;font-size:18px;line-height:22px;font-weight:700;color:#16201d;">{signal.score:.1f}</div>
+                  <div style="margin-top:4px;font-size:12px;line-height:17px;font-weight:700;color:#4f6b5d;">{escape(signal.confidence_level or _confidence(signal))} confidence</div>
+                  <a href="{escape(_maps_url(signal))}" style="display:inline-block;margin-top:8px;font-size:13px;line-height:18px;font-weight:700;color:#9a563c;text-decoration:none;">Open Maps</a>
+                </td>
+              </tr>
+            </table>
+          </div>
+        </article>
         """
-        for signal in report.signals
+        for index, signal in enumerate(report.signals, start=1)
     )
     return f"""
-    <main>
-      <h1>{escape(report.title)}</h1>
-      <p><strong>Week of {escape(report.week_start)}</strong></p>
-      <p>{escape(report.region)}</p>
-      <p>{escape(report.intro)}</p>
-      <ol>{items}</ol>
-    </main>
+    <!doctype html>
+    <html>
+      <body style="margin:0;padding:0;background:#f7f3eb;font-family:Arial,Helvetica,sans-serif;color:#16201d;">
+        <div style="display:none;max-height:0;overflow:hidden;color:#f7f3eb;">
+          {escape(report.intro)}
+        </div>
+        <main style="width:100%;background:#f7f3eb;padding:28px 12px;">
+          <div style="max-width:720px;margin:0 auto;">
+            <header style="padding:0 0 26px 0;border-bottom:1px solid #ddd4c6;">
+              <div style="display:inline-block;padding:7px 11px;border:1px solid #ddd4c6;border-radius:6px;background:rgba(255,255,255,0.82);font-size:14px;line-height:18px;font-weight:700;color:#4f6b5d;">
+                LocalSignal
+              </div>
+              <h1 style="max-width:620px;margin:16px 0 0 0;font-size:42px;line-height:46px;font-weight:700;color:#16201d;">{escape(report.title)}</h1>
+              <p style="max-width:610px;margin:15px 0 0 0;font-size:17px;line-height:27px;color:rgba(22,32,29,0.75);">{escape(report.intro)}</p>
+              <p style="max-width:610px;margin:12px 0 0 0;font-size:15px;line-height:24px;color:rgba(22,32,29,0.68);">{escape(_briefing_summary(report))}</p>
+              {_category_status_html(report)}
+              <div style="margin-top:18px;padding:15px;border:1px solid #ddd4c6;border-radius:8px;background:rgba(255,255,255,0.88);">
+                <div style="font-size:14px;line-height:20px;font-weight:700;color:#16201d;">Week of {escape(report.week_start)}</div>
+                <div style="margin-top:5px;font-size:14px;line-height:20px;color:rgba(22,32,29,0.66);">{escape(report.region)}</div>
+                <div style="margin-top:9px;font-size:14px;line-height:20px;font-weight:700;color:#4f6b5d;">{len(report.signals)} signals ranked</div>
+              </div>
+            </header>
+            <section style="padding-top:18px;">
+              {items}
+            </section>
+          </div>
+        </main>
+      </body>
+    </html>
     """
+
+
+def _has_briefing(report: Report) -> bool:
+    briefing = report.briefing or {}
+    return bool(briefing.get("title") and briefing.get("subtitle") and briefing.get("why_it_matters"))
+
+
+def _render_briefing_html(report: Report) -> str:
+    briefing = report.briefing
+    places = "\n".join(
+        f"""
+        <tr>
+          <td style="padding:13px 14px 13px 0;border-top:1px solid #e5dccf;vertical-align:top;">
+            <div style="font-size:15px;line-height:21px;font-weight:700;color:#16201d;">{escape(str(place.get("name") or ""))}</div>
+            <div style="margin-top:3px;font-size:13px;line-height:19px;color:rgba(22,32,29,0.58);">{escape(str(place.get("area") or ""))}</div>
+          </td>
+          <td style="padding:13px 0;border-top:1px solid #e5dccf;vertical-align:top;font-size:14px;line-height:22px;color:rgba(22,32,29,0.72);">
+            {escape(str(place.get("reason") or ""))}
+          </td>
+        </tr>
+        """
+        for place in (briefing.get("places_involved") or [])[:3]
+    )
+    reads = "\n".join(
+        f"""
+        <article style="margin:0 0 12px 0;padding:18px;border:1px solid #ddd4c6;border-radius:8px;background:rgba(255,255,255,0.9);">
+          <h2 style="margin:0;font-size:19px;line-height:25px;font-weight:700;color:#16201d;">{escape(str(read.get("title") or ""))}</h2>
+          <p style="margin:8px 0 0 0;font-size:14px;line-height:22px;color:rgba(22,32,29,0.70);">{escape(str(read.get("summary") or ""))}</p>
+        </article>
+        """
+        for read in (briefing.get("supporting_reads") or [])[:3]
+    )
+    return f"""
+    <!doctype html>
+    <html>
+      <body style="margin:0;padding:0;background:#f7f3eb;font-family:Arial,Helvetica,sans-serif;color:#16201d;">
+        <div style="display:none;max-height:0;overflow:hidden;color:#f7f3eb;">
+          {escape(str(briefing.get("subtitle") or report.intro))}
+        </div>
+        <main style="width:100%;background:#f7f3eb;padding:28px 12px;">
+          <div style="max-width:720px;margin:0 auto;">
+            <header style="padding:0 0 26px 0;border-bottom:1px solid #ddd4c6;">
+              <div style="display:inline-block;padding:7px 11px;border:1px solid #ddd4c6;border-radius:6px;background:rgba(255,255,255,0.82);font-size:14px;line-height:18px;font-weight:700;color:#4f6b5d;">
+                LocalSignal
+              </div>
+              <h1 style="max-width:640px;margin:16px 0 0 0;font-size:40px;line-height:45px;font-weight:700;color:#16201d;">{escape(str(briefing.get("title") or report.title))}</h1>
+              <p style="max-width:610px;margin:15px 0 0 0;font-size:17px;line-height:27px;color:rgba(22,32,29,0.75);">{escape(str(briefing.get("subtitle") or report.intro))}</p>
+              <p style="max-width:610px;margin:16px 0 0 0;padding-left:14px;border-left:2px solid #4f6b5d;font-size:15px;line-height:24px;color:rgba(22,32,29,0.72);">{escape(str(briefing.get("why_it_matters") or ""))}</p>
+              <div style="margin-top:18px;font-size:14px;line-height:20px;color:rgba(22,32,29,0.60);">Week of {escape(report.week_start)} · {escape(report.region)}</div>
+            </header>
+            <section style="padding-top:22px;">
+              <h2 style="margin:0 0 8px 0;font-size:18px;line-height:24px;font-weight:700;color:#16201d;">Places involved</h2>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                {places}
+              </table>
+            </section>
+            <section style="padding-top:22px;">
+              <h2 style="margin:0 0 12px 0;font-size:18px;line-height:24px;font-weight:700;color:#16201d;">Also worth noting</h2>
+              {reads}
+            </section>
+          </div>
+        </main>
+      </body>
+    </html>
+    """
+
+
+def _label_for(signal_type: str) -> str:
+    labels = {
+        "keyword_spike": "Keyword spike",
+        "behavior_shift": "Behavior shift",
+        "sentiment_shift": "Sentiment shift",
+        "new_place_detected": "New place",
+        "review_velocity_spike": "Review velocity spike",
+    }
+    return labels.get(signal_type, "Local signal")
+
+
+def _briefing_summary(report: Report) -> str:
+    if not report.signals:
+        return "No published food signals are available this week."
+    top = report.signals[0]
+    neighborhoods = sorted({signal.place_neighborhood or signal.city for signal in report.signals})
+    categories = sorted({signal.place_category for signal in report.signals})
+    return (
+        f"This week's strongest signal is {top.place_name}, led by {_label_for(top.signal_type).lower()} evidence. "
+        f"The feed spans {', '.join(neighborhoods[:3])} across {', '.join(categories[:3])}, with confidence weighted by source diversity and recent evidence."
+    )
+
+
+def _category_status_text(report: Report) -> list[str]:
+    return [f"- {status['label']}: {status['status']} — {status['detail']}" for status in _category_statuses(report)]
+
+
+def _category_status_html(report: Report) -> str:
+    items = "\n".join(
+        f"""
+        <tr>
+          <td style="padding:9px 8px 9px 0;border-top:1px solid #e5dccf;font-size:14px;line-height:20px;font-weight:700;color:#16201d;">{escape(status['label'])}</td>
+          <td style="padding:9px 8px;border-top:1px solid #e5dccf;font-size:13px;line-height:19px;font-weight:700;color:{escape(status['color'])};">{escape(status['status'])}</td>
+          <td style="padding:9px 0 9px 8px;border-top:1px solid #e5dccf;font-size:13px;line-height:19px;color:rgba(22,32,29,0.68);">{escape(status['detail'])}</td>
+        </tr>
+        """
+        for status in _category_statuses(report)
+    )
+    return f"""
+      <div style="margin-top:18px;padding:15px;border:1px solid #ddd4c6;border-radius:8px;background:rgba(255,255,255,0.88);">
+        <div style="font-size:13px;line-height:18px;font-weight:700;text-transform:uppercase;color:#4f6b5d;">Category watch</div>
+        <div style="margin-top:5px;font-size:13px;line-height:20px;color:rgba(22,32,29,0.66);">Signals are only generated when evidence clears the weekly threshold.</div>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px;border-collapse:collapse;">
+          {items}
+        </table>
+      </div>
+    """
+
+
+def _category_statuses(report: Report) -> list[dict[str, str]]:
+    channels = [
+        ("Korean Food", _matches_korean),
+        ("Cafes", _matches_cafe),
+        ("Desserts", _matches_dessert),
+        ("Late-night", _matches_late_night),
+        ("New Opening", _matches_opening),
+    ]
+    statuses = []
+    for label, matcher in channels:
+        matched = [signal for signal in report.signals if matcher(signal)]
+        strong = [signal for signal in matched if _is_strong_signal(signal)]
+        if strong:
+            top = max(strong, key=lambda signal: signal.score)
+            statuses.append(
+                {
+                    "label": label,
+                    "status": "Strong signal",
+                    "detail": f"{top.place_name} is carrying the clearest weekly evidence.",
+                    "color": "#4f6b5d",
+                }
+            )
+        elif matched:
+            top = max(matched, key=lambda signal: signal.score)
+            statuses.append(
+                {
+                    "label": label,
+                    "status": "Watching",
+                    "detail": f"Early movement around {top.place_name}, but evidence is still developing.",
+                    "color": "#9a563c",
+                }
+            )
+        else:
+            statuses.append(
+                {
+                    "label": label,
+                    "status": "No strong signal detected",
+                    "detail": "Still monitoring new mentions, wait-time changes, and cross-platform activity.",
+                    "color": "rgba(22,32,29,0.52)",
+                }
+            )
+    return statuses
+
+
+def _is_strong_signal(signal: ReportSignal) -> bool:
+    source_count = int(signal.evidence.get("source_count") or len(signal.evidence.get("sources", [])) or 0)
+    mention_count = int(signal.evidence.get("current_mention_count") or signal.evidence.get("mention_count") or 0)
+    return signal.score >= 70 and source_count >= 2 and mention_count >= 2
+
+
+def _signal_text(signal: ReportSignal) -> str:
+    keywords = " ".join(str(keyword) for keyword in signal.evidence.get("keywords", []))
+    return " ".join(
+        [
+            signal.title,
+            signal.summary,
+            signal.place_name,
+            signal.place_category,
+            signal.signal_type,
+            keywords,
+        ]
+    ).lower()
+
+
+def _matches_korean(signal: ReportSignal) -> bool:
+    text = _signal_text(signal)
+    return any(term in text for term in ["korean", "tofu", "bbq", "banchan", "so gong dong", "bcd"])
+
+
+def _matches_cafe(signal: ReportSignal) -> bool:
+    text = _signal_text(signal)
+    return any(term in text for term in ["cafe", "coffee", "kuppi", "remote", "wifi", "outlet"])
+
+
+def _matches_dessert(signal: ReportSignal) -> bool:
+    text = _signal_text(signal)
+    return any(term in text for term in ["dessert", "bakery", "cake", "pastry", "matcha", "sweet", "cream"])
+
+
+def _matches_late_night(signal: ReportSignal) -> bool:
+    text = _signal_text(signal)
+    return any(term in text for term in ["late night", "late-night", "after 9", "midnight", "night"])
+
+
+def _matches_opening(signal: ReportSignal) -> bool:
+    text = _signal_text(signal)
+    return any(term in text for term in ["opening", "new menu", "soft opening", "new place"])
+
+
+def _evidence_assessment(signal: ReportSignal) -> str:
+    source_count = int(signal.evidence.get("source_count") or len(signal.evidence.get("sources", [])) or 0)
+    mention_count = int(signal.evidence.get("current_mention_count") or signal.evidence.get("mention_count") or 0)
+    if source_count >= 2 and mention_count >= 3:
+        return f"Strong support: {mention_count} recent mentions across {source_count} sources."
+    if mention_count >= 2:
+        return f"Developing support: {mention_count} recent mentions, with evidence still building."
+    return "Evidence coverage is still building for this signal."
+
+
+def _confidence(signal: ReportSignal) -> str:
+    source_count = int(signal.evidence.get("source_count") or len(signal.evidence.get("sources", [])) or 0)
+    mention_count = int(signal.evidence.get("current_mention_count") or 0)
+    if source_count >= 2 and mention_count >= 3:
+        return "High"
+    if source_count >= 2 or mention_count >= 2:
+        return "Medium"
+    return "Low"
+
+
+def _maps_url(signal: ReportSignal) -> str:
+    query = urllib.parse.quote_plus(f"{signal.place_name} {signal.city} NJ")
+    return f"https://www.google.com/maps/search/{query}"

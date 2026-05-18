@@ -1,0 +1,44 @@
+[
+  {
+    "source": "instagram",
+    "source_url": "https://www.instagram.com/p/example/",
+    "caption": "Public post caption or a short manual summary of visible text.",
+    "ocr_text": "Optional visible text from the image or reel.",
+    "place_name": "Visible business name",
+    "possible_place_names": ["Alternate business name", "Chinese/Korean name from OCR"],
+    "likes": 120,
+    "comments": 8,
+    "views": 2400,
+    "occurred_at": "2026-05-14T12:00:00+00:00",
+    "collection_method": "manual_public_observation",
+    "collector": "internal"
+  },
+  {
+    "source": "tiktok",
+    "source_url": "https://www.tiktok.com/@creator/video/example",
+    "caption": "Public TikTok caption or short visible-content summary.",
+    "place_name": "Visible business name",
+    "hashtags": ["FortLee", "NJFood"],
+    "likes": 500,
+    "comments": 20,
+    "shares": 12,
+    "views": 15000,
+    "occurred_at": "2026-05-14T12:00:00+00:00",
+    "collection_method": "manual_public_observation",
+    "collector": "internal"
+  },
+  {
+    "source": "xhs",
+    "source_url": "https://www.xiaohongshu.com/explore/example",
+    "note_title": "Visible Xiaohongshu note title",
+    "caption": "Public note caption or short visible-content summary.",
+    "ocr_text": "Optional OCR text from visible screenshots.",
+    "possible_place_names": ["Visible business name", "Chinese alias", "English alias"],
+    "likes": 300,
+    "comments": 18,
+    "saves": 40,
+    "occurred_at": "2026-05-14T12:00:00+00:00",
+    "collection_method": "manual_public_observation",
+    "collector": "internal"
+  }
+]

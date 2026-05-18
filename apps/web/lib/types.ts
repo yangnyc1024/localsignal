@@ -46,7 +46,31 @@ export type Report = {
   region: string;
   week_start: string;
   intro: string;
+  briefing?: BriefingPayload | null;
   signals: Signal[];
+};
+
+export type BriefingPayload = {
+  title?: string;
+  subtitle?: string;
+  why_it_matters?: string;
+  places_involved?: Array<{
+    name: string;
+    area: string;
+    category: string;
+    signal_slug: string;
+    reason: string;
+  }>;
+  supporting_reads?: Array<{
+    title: string;
+    summary: string;
+    signal_slug: string;
+  }>;
+  sources?: Array<{
+    label: string;
+    detail: string;
+    signal_slug: string;
+  }>;
 };
 
 export type SignalMetric = {

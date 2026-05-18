@@ -1,0 +1,39 @@
+[
+  {
+    "place_name": "Kuppi Coffee Company",
+    "source": "tiktok_metadata",
+    "source_url": "https://www.tiktok.com/@creator/video/123",
+    "caption": "Quiet work spot with matcha and outlets. Worth the drive after lunch.",
+    "views": 12000,
+    "likes": 900,
+    "comments": 42,
+    "shares": 18,
+    "city": "Edgewater",
+    "occurred_at": "2026-05-12T12:00:00+00:00"
+  },
+  {
+    "place_id": "33333333-3333-3333-3333-333333333333",
+    "source": "instagram",
+    "source_url": "https://www.instagram.com/p/example/",
+    "caption": "Line was out the door for soft tofu tonight.",
+    "likes": 320,
+    "comments": 21,
+    "neighborhood": "Broad Avenue",
+    "occurred_at": "2026-05-12T19:30:00+00:00"
+  },
+  {
+    "source": "xhs",
+    "source_url": "https://www.xiaohongshu.com/explore/example",
+    "author_id": "rednote_user_123",
+    "note_title": "Fort Lee 盐面包突然好多人排队",
+    "caption": "这家 bakery 的 salt bread 最近很多人打卡，下午过去已经快卖完。",
+    "ocr_text": "BUTTER & SCOOP Artisan Boulanger salt bread",
+    "possible_place_names": ["BUTTER & SCOOP", "Artisan Boulanger", "Fort Lee 盐面包"],
+    "hashtags": ["FortLee", "盐面包", "NJ美食", "小红书探店"],
+    "likes": 870,
+    "comments": 56,
+    "saves": 120,
+    "city": "Fort Lee",
+    "occurred_at": "2026-05-13T16:00:00+00:00"
+  }
+]

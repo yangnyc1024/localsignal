@@ -4,6 +4,7 @@
 !.env.example
 node_modules/
 .next/
+*.tsbuildinfo
 dist/
 build/
 .venv/
@@ -13,3 +14,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 postgres_data/
+tmp/
+data/social/*.json
+data/social/*.jsonl
+data/social/*.csv
+
+data/social/**/*.json
+data/social/**/*.jsonl
+data/social/**/*.csv
