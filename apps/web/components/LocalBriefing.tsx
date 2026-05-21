@@ -1,8 +1,27 @@
-import { ArrowUpRight, CalendarDays, MapPin, Newspaper, Sparkles, Utensils } from "lucide-react";
+"use client";
+
+import {
+  ArrowUpRight,
+  Beef,
+  CalendarDays,
+  Coffee,
+  Croissant,
+  Fish,
+  Moon,
+  Newspaper,
+  Pizza,
+  Salad,
+  Soup,
+  Sparkles,
+  Star,
+  Utensils
+} from "lucide-react";
 import Link from "next/link";
+import { useMemo, useState } from "react";
 
 import type { Report } from "@/lib/types";
-import { buildLocalBriefing } from "@/lib/briefing";
+import { FOOD_CATEGORIES, buildLocalBriefing } from "@/lib/briefing";
+import type { FoodCategoryKey } from "@/lib/briefing";
 
 type Props = {
   report: Report;
@@ -10,6 +29,18 @@ type Props = {
 
 export function LocalBriefing({ report }: Props) {
   const briefing = buildLocalBriefing(report);
+  const allCards = useMemo(() => briefing.categorySections.flatMap((section) => section.cards), [briefing.categorySections]);
+  const availableFilters = useMemo(() => {
+    const counts = new Map(briefing.categorySections.map((section) => [section.key, section.cards.length]));
+    return [{ key: "all", label: "All", count: allCards.length }, ...FOOD_CATEGORIES.map((category) => ({
+      key: category.key,
+      label: category.label,
+      count: counts.get(category.key) ?? 0
+    }))];
+  }, [allCards.length, briefing.categorySections]);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const activeSection = briefing.categorySections.find((section) => section.key === activeFilter);
+  const filteredCards = activeFilter === "all" ? allCards : allCards.filter((card) => card.categoryKey === activeFilter);
 
   return (
     <article className="mx-auto grid w-full max-w-[1180px] gap-8 px-4 py-7 md:px-8 md:py-10 lg:gap-10 lg:px-10">
@@ -26,7 +57,7 @@ export function LocalBriefing({ report }: Props) {
 
         <div className="grid min-w-0 gap-4">
           <div className="min-w-0">
-            <div className="text-sm font-semibold uppercase text-ink/48">What this page is</div>
+            <div className="text-sm font-semibold uppercase text-ink/48">Food briefing</div>
             <h1 className="mt-2 break-words text-4xl font-semibold leading-tight text-ink md:text-[3rem] lg:text-[3.4rem]">
               {briefing.scopeTitle}
             </h1>
@@ -46,73 +77,53 @@ export function LocalBriefing({ report }: Props) {
             {briefing.title}
           </h2>
           <p className="mt-4 text-[17px] leading-8 text-ink/74 lg:text-lg lg:leading-8">{briefing.subtitle}</p>
-          <p className="mt-4 border-l-2 border-moss pl-4 text-base leading-7 text-ink/70">
-            {briefing.whyItMatters}
-          </p>
+          {briefing.foodReads.length ? (
+            <div className="mt-5 grid gap-3">
+              {briefing.foodReads.map((read) => (
+                <Link
+                  key={`${read.label}-${read.href}`}
+                  href={read.href}
+                  className="group grid gap-1 rounded-md border border-line bg-paper/75 p-3 transition hover:border-moss/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-moss/35"
+                >
+                  <div className="flex min-w-0 items-center justify-between gap-3">
+                    <span className="break-words text-base font-semibold text-ink group-hover:text-moss">{read.label}</span>
+                    <ArrowUpRight size={15} className="shrink-0 text-moss" />
+                  </div>
+                  <p className="text-sm leading-6 text-ink/66">{read.why}</p>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-4 border-l-2 border-moss pl-4 text-base leading-7 text-ink/70">
+              {briefing.whyItMatters}
+            </p>
+          )}
         </section>
       </header>
 
-      {briefing.topSignals.length ? (
+      {briefing.longTermSignals.length ? (
         <section className="grid gap-4">
-          <div>
+          <div className="flex min-w-0 items-end justify-between gap-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-ink/72">
-              <Utensils size={16} className="text-moss" />
-              Start with these three
+              <Star size={16} className="text-moss" />
+              Longer-running signals
             </div>
-            <p className="mt-1 text-sm leading-6 text-ink/60">
-              Open one when you already know the craving, the occasion, or the kind of night you want.
-            </p>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] gap-4">
-            {briefing.topSignals.map((signal) => (
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-3 sm:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]">
+            {briefing.longTermSignals.map((signal) => (
               <Link
-                key={signal.href}
+                key={`${signal.place}-${signal.href}`}
                 href={signal.href}
-                className="group min-w-0 rounded-lg border border-line bg-white p-5 shadow-sm transition hover:border-moss/45 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-moss/35 lg:p-6"
+                className="group flex aspect-square min-w-0 flex-col justify-between rounded-lg border border-line bg-white p-4 shadow-sm transition hover:border-moss/45 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-moss/35"
               >
-                <div className="text-xs font-semibold uppercase text-moss">{signal.category}</div>
-                <h2 className="mt-2 break-words text-2xl font-semibold leading-8 text-ink group-hover:text-moss lg:text-[1.7rem] lg:leading-9">{signal.place}</h2>
-                <p className="mt-3 text-[17px] font-semibold leading-7 text-ink/78">{signal.pull}</p>
-                <div className="mt-4 grid gap-3 text-[15px] leading-6 text-ink/66">
-                  <p>
-                    <span className="font-semibold text-ink/80">Good for: </span>
-                    {signal.goodFor}
-                  </p>
-                  <p>
-                    <span className="font-semibold text-ink/80">What changed: </span>
-                    {signal.changed}
-                  </p>
+                <div className="min-w-0">
+                  <div className="break-words text-xs font-semibold uppercase leading-5 text-moss">{signal.category}</div>
+                  <h2 className="mt-2 break-words text-lg font-semibold leading-6 text-ink group-hover:text-moss">{signal.place}</h2>
                 </div>
-                <div className="mt-4 flex min-w-0 items-center justify-between gap-3 text-sm font-semibold text-ink/50">
-                  <span className="min-w-0 break-words">{signal.area}</span>
-                  <span className="inline-flex items-center gap-1 text-moss">
-                    Open details
-                    <ArrowUpRight size={16} />
-                  </span>
+                <div className="flex min-w-0 items-end justify-between gap-2">
+                  <div className="min-w-0 break-words text-sm font-semibold leading-5 text-ink/68">{signal.signatureDish}</div>
+                  <ArrowUpRight size={15} className="shrink-0 text-moss" />
                 </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {briefing.places.length ? (
-        <section className="grid gap-4">
-          <div className="flex items-center gap-2 text-sm font-semibold text-ink/72">
-            <MapPin size={16} className="text-moss" />
-            Places behind this week&apos;s read
-          </div>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,300px),1fr))] gap-4">
-            {briefing.places.slice(0, 3).map((place) => (
-              <Link
-                key={`${place.name}-${place.area}`}
-                href={place.href}
-                className="group min-w-0 rounded-lg border border-line bg-white p-4 shadow-sm transition hover:border-moss/45 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-moss/35 md:p-5 lg:p-6"
-              >
-                <div className="text-xs font-semibold uppercase text-moss">{place.category}</div>
-                <h2 className="mt-2 break-words text-xl font-semibold leading-7 text-ink group-hover:text-moss">{place.name}</h2>
-                <div className="mt-2 break-words text-sm text-ink/58">{place.area}</div>
-                {place.reason ? <p className="mt-3 text-[15px] leading-6 text-ink/62">{place.reason}</p> : null}
               </Link>
             ))}
           </div>
@@ -121,42 +132,68 @@ export function LocalBriefing({ report }: Props) {
 
       {briefing.categorySections.length ? (
         <section className="grid gap-4 border-t border-line pt-7">
-          <div className="flex items-center gap-2 text-sm font-semibold text-ink/72">
-            <Utensils size={16} className="text-moss" />
-            Browse by craving or occasion
+          <div className="grid gap-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-ink/72">
+              <Utensils size={16} className="text-moss" />
+              Browse by craving or occasion
+            </div>
+            <div className="flex flex-wrap gap-2 md:max-w-4xl">
+              {availableFilters.map((filter) => {
+                const isActive = activeFilter === filter.key;
+                const Icon = iconForFilter(filter.key);
+                return (
+                  <button
+                    key={filter.key}
+                    type="button"
+                    disabled={filter.count === 0}
+                    onClick={() => setActiveFilter(filter.key)}
+                    className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-moss/35 ${
+                      isActive ? "border-moss bg-moss text-white" : "border-line bg-white text-ink/68 hover:border-moss/45 hover:text-ink"
+                    } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line disabled:hover:text-ink/68`}
+                  >
+                    <Icon size={15} />
+                    {filter.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="max-w-2xl text-sm leading-6 text-ink/60">
+              {activeSection?.description ?? "Pick a food lane, then open the card with the dish or occasion that matches."}
+            </p>
           </div>
-          <div className="grid gap-5">
-            {briefing.categorySections.map((section) => (
-              <section key={section.label} className="grid gap-3">
-                <div>
-                  <h2 className="text-xl font-semibold text-ink">{section.label}</h2>
-                  <p className="mt-1 text-sm leading-6 text-ink/60">{section.description}</p>
+          <div className="grid gap-3">
+            {filteredCards.map((card) => (
+              <Link
+                key={`${activeFilter}-${card.href}`}
+                href={card.href}
+                className="group grid min-w-0 gap-3 rounded-lg border border-line bg-white p-4 shadow-sm transition hover:border-moss/45 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-moss/35 md:p-5"
+              >
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="break-words text-xs font-semibold uppercase text-moss">{card.category}</div>
+                    <h3 className="mt-2 break-words text-xl font-semibold leading-7 text-ink group-hover:text-moss">{card.place}</h3>
+                  </div>
+                  <ArrowUpRight size={16} className="mt-1 shrink-0 text-moss" />
                 </div>
-                <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,300px),1fr))] gap-4">
-                  {section.cards.map((card) => (
-                    <Link
-                      key={`${section.label}-${card.href}`}
-                      href={card.href}
-                      className="group min-w-0 rounded-lg border border-line bg-white p-4 shadow-sm transition hover:border-moss/45 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-moss/35 md:p-5"
-                    >
-                      <div className="break-words text-xs font-semibold uppercase text-moss">{card.area}</div>
-                      <h3 className="mt-2 break-words text-lg font-semibold leading-7 text-ink group-hover:text-moss">{card.title}</h3>
-                      <p className="mt-2 text-[15px] leading-7 text-ink/64">{card.changed}</p>
-                      <p className="mt-2 text-sm leading-6 text-ink/58">
-                        <span className="font-semibold text-ink/70">Good for: </span>
-                        {card.goodFor}
-                      </p>
-                      <div className="mt-3 flex min-w-0 items-center justify-between gap-3 text-sm font-semibold text-ink/50">
-                        <span className="min-w-0 break-words">{card.place}</span>
-                        <span className="inline-flex items-center gap-1 text-moss">
-                          Details
-                          <ArrowUpRight size={15} />
-                        </span>
-                      </div>
-                    </Link>
-                  ))}
+                <div className="rounded-md bg-paper/80 p-3">
+                  <div className="text-xs font-semibold uppercase text-ink/48">Food cue</div>
+                  <div className="mt-1 break-words text-base font-semibold leading-6 text-ink">{card.signatureDish}</div>
                 </div>
-              </section>
+                <div className="grid gap-2 text-[15px] leading-7 text-ink/66">
+                  <p>
+                    <span className="font-semibold text-ink/80">About this place: </span>
+                    {card.placeSummary}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-ink/80">Why now: </span>
+                    {card.signalSummary}
+                  </p>
+                </div>
+                <div className="flex min-w-0 items-center justify-between gap-3 text-sm text-ink/56">
+                  <span className="min-w-0 break-words">{card.area}</span>
+                  <span className="shrink-0 font-semibold text-moss">Details</span>
+                </div>
+              </Link>
             ))}
           </div>
         </section>
@@ -180,4 +217,20 @@ export function LocalBriefing({ report }: Props) {
       ) : null}
     </article>
   );
+}
+
+function iconForFilter(key: string) {
+  const icons: Record<FoodCategoryKey | "all", typeof Sparkles> = {
+    all: Sparkles,
+    korean: Beef,
+    japanese: Soup,
+    seafood: Fish,
+    mediterranean: Salad,
+    pizza: Pizza,
+    cafe: Coffee,
+    brunch: Croissant,
+    dinner: Utensils,
+    "night-stay": Moon
+  };
+  return icons[key as FoodCategoryKey | "all"] ?? Sparkles;
 }

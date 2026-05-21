@@ -1,5 +1,98 @@
-import type { BriefingPayload, Report, Signal } from "@/lib/types";
-import { bestReadAs, cuisineType, evidenceNotes, mentionCountFor, phenomenonTitle, placeIdentity, readerSummary, sourceCountFor } from "@/lib/signalStory";
+import type { Report, Signal } from "@/lib/types";
+import { cuisineType, evidenceNotes, mentionCountFor, sourceCountFor } from "@/lib/signalStory";
+
+export type FoodCategoryKey =
+  | "cafe"
+  | "korean"
+  | "japanese"
+  | "seafood"
+  | "pizza"
+  | "brunch"
+  | "mediterranean"
+  | "night-stay"
+  | "dinner";
+
+type FoodCategory = {
+  key: FoodCategoryKey;
+  label: string;
+  description: string;
+  terms: string[];
+};
+
+export const FOOD_CATEGORIES: FoodCategory[] = [
+  {
+    key: "korean",
+    label: "Korean",
+    description: "BBQ, tofu, shared tables, and Korean comfort-food nights.",
+    terms: ["korean", "bbq", "soondubu", "tofu", "banchan", "samgyupsal", "hanam", "hansang", "chungchoon"]
+  },
+  {
+    key: "japanese",
+    label: "Japanese",
+    description: "Donkatsu, ramen, sushi, and casual Japanese comfort-food stops.",
+    terms: ["donkatsu", "tonkatsu", "ramen", "sushi", "izakaya", "japanese"]
+  },
+  {
+    key: "seafood",
+    label: "Seafood",
+    description: "Crab boil, seafood, spice, and bigger dinner flavors.",
+    terms: ["seafood", "crab", "boil", "cajun", "shrimp", "lobster"]
+  },
+  {
+    key: "mediterranean",
+    label: "Mediterranean",
+    description: "Doner, kebab, falafel, and quick Mediterranean meals.",
+    terms: ["doner", "döner", "kebab", "falafel", "gyro", "mediterranean"]
+  },
+  {
+    key: "pizza",
+    label: "Pizza",
+    description: "Pizza-specific cards for when the craving is already obvious.",
+    terms: ["pizza", "sourdough pizza", "pinsa"]
+  },
+  {
+    key: "cafe",
+    label: "Cafe",
+    description: "Coffee, matcha, pastries, and longer sit-down visits.",
+    terms: ["cafe", "coffee", "espresso", "latte", "matcha", "pastry"]
+  },
+  {
+    key: "brunch",
+    label: "Brunch",
+    description: "Pancakes, benedicts, and cafe-grill plates.",
+    terms: ["brunch", "pancake", "pancakes", "benedict", "omelet"]
+  },
+  {
+    key: "dinner",
+    label: "Dinner",
+    description: "Waits, lines, and slower dinner expectations.",
+    terms: ["wait", "line", "reservation", "dinner", "service pace"]
+  },
+  {
+    key: "night-stay",
+    label: "Night stay",
+    description: "Late dinner, pocha energy, and places that fit a longer night.",
+    terms: ["late", "late-night", "night", "pocha", "pub", "bar", "vibes"]
+  }
+];
+
+const CATEGORY_MATCH_ORDER: FoodCategoryKey[] = [
+  "brunch",
+  "pizza",
+  "mediterranean",
+  "japanese",
+  "seafood",
+  "korean",
+  "cafe",
+  "night-stay",
+  "dinner"
+];
+
+export type FoodRead = {
+  label: string;
+  why: string;
+  href: string;
+};
 
 export type LocalBriefing = {
   eyebrow: string;
@@ -8,44 +101,35 @@ export type LocalBriefing = {
   title: string;
   subtitle: string;
   whyItMatters: string;
-  places: BriefingPlace[];
-  topSignals: ReaderSignalCard[];
+  foodReads: FoodRead[];
+  longTermSignals: LongTermSignalCard[];
   categorySections: CategorySignalSection[];
-  supportingReads: MiniRead[];
   sources: BriefingSource[];
 };
 
-export type BriefingPlace = {
-  name: string;
-  area: string;
-  category: string;
-  reason: string;
-  href: string;
-};
-
 export type ReaderSignalCard = {
-  title: string;
   place: string;
   area: string;
   category: string;
-  pull: string;
-  goodFor: string;
-  changed: string;
-  summary: string;
+  categoryKey: string;
+  signatureDish: string;
+  placeSummary: string;
+  signalSummary: string;
+  href: string;
+};
+
+export type LongTermSignalCard = {
+  place: string;
+  category: string;
+  signatureDish: string;
   href: string;
 };
 
 export type CategorySignalSection = {
+  key: string;
   label: string;
   description: string;
   cards: ReaderSignalCard[];
-};
-
-export type MiniRead = {
-  title: string;
-  summary: string;
-  href: string;
-  place: string;
 };
 
 export type BriefingSource = {
@@ -55,16 +139,10 @@ export type BriefingSource = {
 };
 
 export function buildLocalBriefing(report: Report): LocalBriefing {
-  const llmBriefing = fromBackendBriefing(report);
-  if (llmBriefing) {
-    return llmBriefing;
-  }
-
   const sortedSignals = [...report.signals].sort((left, right) => right.score - left.score);
-  const main = sortedSignals[0];
-  const supporting = sortedSignals.slice(1, 4);
+  const topCards = sortedSignals.slice(0, 3).map(signalCardFor);
 
-  if (!main) {
+  if (!sortedSignals.length) {
     return {
       eyebrow: `Week of ${formatDate(report.week_start)}`,
       title: "Nothing clear is changing this week",
@@ -72,286 +150,374 @@ export function buildLocalBriefing(report: Report): LocalBriefing {
       scopeSummary: scopeSummary(report),
       subtitle: "The local read is quiet, which is sometimes the most useful answer.",
       whyItMatters: "LocalSignal is holding back rather than turning thin evidence into a story.",
-      places: [],
-      topSignals: [],
+      foodReads: [],
+      longTermSignals: [],
       categorySections: [],
-      supportingReads: [],
       sources: []
     };
   }
-
-  const mainIdentity = placeIdentity(main);
-  const supportingPlaces = supporting.map(placeForSignal);
-  const places = [placeForSignal(main), ...supportingPlaces].filter(uniquePlace);
 
   return {
     eyebrow: `${formatDate(report.week_start)} · ${report.region}`,
     scopeTitle: "This is a weekly local food briefing",
     scopeSummary: scopeSummary(report),
-    title: weeklyReaderTitle(report),
-    subtitle: weeklyReaderSubtitle(report),
-    whyItMatters: weeklyReaderWhy(report),
-    places,
-    topSignals: sortedSignals.slice(0, 3).map(signalCardFor),
+    title: weeklyReaderTitle(topCards),
+    subtitle: weeklyReaderSubtitle(topCards),
+    whyItMatters: weeklyReaderWhy(),
+    foodReads: foodReadsFor(sortedSignals),
+    longTermSignals: longTermSignalsFor(sortedSignals),
     categorySections: categorySectionsFor(sortedSignals),
-    supportingReads: supporting.map((signal) => ({
-      title: phenomenonTitle(signal),
-      summary: oneSentence(readerSummary(signal)),
-      href: `/signal/${signal.slug}`,
-      place: `${signal.place.name} · ${signal.place.neighborhood ?? signal.city}`
-    })),
     sources: sortedSignals.slice(0, 6).map((signal) => ({
       label: signal.place.name,
-      detail: sourceLineFor(signal, mainIdentity.cuisine),
+      detail: sourceLineFor(signal),
       href: `/signal/${signal.slug}`
     }))
   };
 }
 
-function fromBackendBriefing(report: Report): LocalBriefing | null {
-  const payload = report.briefing;
-  if (!isUsableBriefing(payload)) {
-    return null;
-  }
-
-  return {
-    eyebrow: `${formatDate(report.week_start)} · ${report.region}`,
-    scopeTitle: "This is a weekly local food briefing",
-    scopeSummary: scopeSummary(report),
-    title: weeklyReaderTitle(report),
-    subtitle: weeklyReaderSubtitle(report),
-    whyItMatters: weeklyReaderWhy(report),
-    places: (payload.places_involved ?? []).slice(0, 3).map((place) => ({
-      name: cleanPlaceName(place.name),
-      area: place.area,
-      category: place.category,
-      reason: place.reason,
-      href: `/signal/${place.signal_slug}`
-    })),
-    topSignals: topSignalsFor(report),
-    categorySections: categorySectionsFor([...report.signals].sort((left, right) => right.score - left.score)),
-    supportingReads: (payload.supporting_reads ?? []).slice(0, 3).map((read) => ({
-      title: read.title,
-      summary: read.summary,
-      href: `/signal/${read.signal_slug}`,
-      place: placeLabelForSlug(report, read.signal_slug)
-    })),
-    sources: (payload.sources ?? []).slice(0, 6).map((source) => {
-      const signal = report.signals.find((candidate) => candidate.slug === source.signal_slug);
-      return {
-        label: signal ? cleanPlaceName(signal.place.name) : source.label,
-        detail: signal ? sourceLineFor(signal, readerCategory(signal)) : source.detail,
-        href: `/signal/${source.signal_slug}`
-      };
-    })
-  };
+function weeklyReaderTitle(topCards: ReaderSignalCard[]) {
+  const categories = [...new Set(topCards.map((signal) => signal.category))].slice(0, 3);
+  return `This week: ${naturalJoin(categories)}`;
 }
 
-function isUsableBriefing(payload: BriefingPayload | null | undefined): payload is Required<Pick<BriefingPayload, "title" | "subtitle" | "why_it_matters">> & BriefingPayload {
-  return Boolean(payload?.title && payload.subtitle && payload.why_it_matters);
+function weeklyReaderSubtitle(topCards: ReaderSignalCard[]) {
+  const foods = naturalJoin([...new Set(topCards.map((signal) => signal.signatureDish))].slice(0, 3));
+  return `A simpler read: these are the food lanes showing up most clearly, starting with ${foods}.`;
 }
 
-function placeLabelForSlug(report: Report, slug: string) {
-  const signal = report.signals.find((candidate) => candidate.slug === slug);
-  if (!signal) {
-    return "Local read";
-  }
-  return `${cleanPlaceName(signal.place.name)} · ${signal.place.neighborhood ?? signal.city}`;
-}
-
-function titleFor(signal: Signal) {
-  const backendTitle = textEvidence(signal, "briefing_title");
-  if (backendTitle) {
-    return backendTitle;
-  }
-  return phenomenonTitle(signal);
-}
-
-function weeklyReaderTitle(report: Report) {
-  const top = topSignalsFor(report);
-  if (!top.length) {
-    return report.briefing?.title || report.title;
-  }
-  const categories = [...new Set(top.map((signal) => signal.category))];
-  if (categories.includes("Spicy seafood") && categories.includes("Korean BBQ & tofu")) {
-    return "Spicy seafood and Korean group dinners are the clearest reads this week";
-  }
-  if (categories.includes("Coffee / work-friendly cafes")) {
-    return "Coffee, wifi, and longer sit-down visits are easier to notice this week";
-  }
-  if (categories.includes("Dinner waits")) {
-    return "Some dinner plans may need a little more patience this week";
-  }
-  return `${top[0].pull} is the clearest local food pull this week`;
-}
-
-function weeklyReaderSubtitle(report: Report) {
-  const top = topSignalsFor(report);
-  if (!top.length) {
-    return report.briefing?.subtitle || report.intro;
-  }
-  const placeText = naturalJoin(top.map((signal) => signal.place));
-  const pulls = naturalJoin([...new Set(top.map((signal) => signal.pull))].slice(0, 3));
-  return `Start with ${placeText}: the useful read is ${pulls}.`;
-}
-
-function weeklyReaderWhy(report: Report) {
-  const top = topSignalsFor(report);
-  if (!top.length) {
-    return report.briefing?.why_it_matters || "Open a card when you want the evidence behind the read.";
-  }
-  return `This is useful when you are choosing where to eat nearby: it turns this week's local food talk into a few concrete cravings, visit occasions, and places to open for details.`;
-}
-
-function subtitleFor(main: Signal, supporting: Signal[]) {
-  const backendSubtitle = textEvidence(main, "briefing_subtitle");
-  if (backendSubtitle) {
-    return backendSubtitle;
-  }
-
-  const places = [main, ...supporting].slice(0, 3).map((signal) => signal.place.name);
-  const placeText = places.length > 1 ? `${places.slice(0, -1).join(", ")} and ${places[places.length - 1]}` : places[0];
-  return `${readerSummary(main)} The places making it worth a closer look include ${placeText}.`;
-}
-
-function whyItMattersFor(signal: Signal) {
-  const backendWhy = textEvidence(signal, "why_this_matters");
-  if (backendWhy) {
-    return backendWhy;
-  }
-  return bestReadAs(signal);
-}
-
-function placeForSignal(signal: Signal): BriefingPlace {
-  const identity = placeIdentity(signal);
-  return {
-    name: cleanPlaceName(identity.name),
-    area: identity.area,
-    category: identity.cuisine,
-    reason: signalPull(signal),
-    href: `/signal/${signal.slug}`
-  };
-}
-
-function topSignalsFor(report: Report) {
-  return [...report.signals].sort((left, right) => right.score - left.score).slice(0, 3).map(signalCardFor);
+function weeklyReaderWhy() {
+  return "Worth caring about because the signal is attached to actual food choices, not generic buzz: what to order, what kind of stop it fits, and which place has the clearest evidence card.";
 }
 
 function categorySectionsFor(signals: Signal[]) {
-  const groups = new Map<string, ReaderSignalCard[]>();
+  const groups = new Map<FoodCategoryKey, ReaderSignalCard[]>();
   for (const signal of signals) {
-    const label = readerCategory(signal);
-    const existing = groups.get(label) ?? [];
+    const category = categoryForSignal(signal);
+    const existing = groups.get(category.key) ?? [];
     if (existing.length < 3) {
       existing.push(signalCardFor(signal));
-      groups.set(label, existing);
+      groups.set(category.key, existing);
     }
   }
-  return [...groups.entries()]
-    .filter(([, cards]) => cards.length > 0)
-    .slice(0, 5)
-    .map(([label, cards]) => ({
+  return FOOD_CATEGORIES
+    .map((category) => ({
+      key: category.key,
+      label: category.label,
+      description: categoryDescription(category.label, groups.get(category.key)?.length ?? 0),
+      cards: groups.get(category.key) ?? []
+    }))
+    .filter((section) => section.cards.length > 0);
+}
+
+function foodReadsFor(signals: Signal[]): FoodRead[] {
+  const used = new Set<string>();
+  const reads: FoodRead[] = [];
+  for (const signal of signals) {
+    const label = readerCategory(signal);
+    if (used.has(label)) {
+      continue;
+    }
+    used.add(label);
+    reads.push({
       label,
-      description: categoryDescription(label, cards.length),
-      cards
-    }));
+      why: categoryWhy(label, signal),
+      href: `/signal/${signal.slug}`
+    });
+    if (reads.length === 3) {
+      break;
+    }
+  }
+  return reads;
+}
+
+function longTermSignalsFor(signals: Signal[]): LongTermSignalCard[] {
+  const usedPlaces = new Set<string>();
+  return FOOD_CATEGORIES.flatMap((category) => {
+    const signal = signals.find((candidate) => {
+      const place = cleanPlaceName(candidate.place.name);
+      return categoryForSignal(candidate).key === category.key && !usedPlaces.has(place);
+    });
+    if (!signal) {
+      return [];
+    }
+    usedPlaces.add(cleanPlaceName(signal.place.name));
+    return [{
+      place: cleanPlaceName(signal.place.name),
+      category: category.label,
+      signatureDish: signatureDish(signal),
+      href: `/signal/${signal.slug}`
+    }];
+  }).slice(0, 8);
 }
 
 function signalCardFor(signal: Signal): ReaderSignalCard {
-  const identity = placeIdentity(signal);
+  const category = categoryForSignal(signal);
   return {
-    title: readerTitle(signal),
-    place: cleanPlaceName(identity.name),
-    area: identity.area,
-    category: readerCategory(signal),
-    pull: signalPull(signal),
-    goodFor: goodFor(signal),
-    changed: whatChanged(signal),
-    summary: plainReaderSummary(signal),
+    place: cleanPlaceName(signal.place.name),
+    area: placeArea(signal),
+    category: category.label,
+    categoryKey: category.key,
+    signatureDish: signatureDish(signal),
+    placeSummary: placeSummary(signal),
+    signalSummary: signalSummary(signal),
     href: `/signal/${signal.slug}`
   };
 }
 
-function readerTitle(signal: Signal) {
-  const category = readerCategory(signal).toLowerCase();
-  const place = cleanPlaceName(signal.place.name);
-  const pull = signalPull(signal).toLowerCase();
-  if (pull.includes("wait")) return `${place} may need a slower dinner mindset`;
-  if (pull.includes("coffee") || pull.includes("cafe")) return `${place} is showing more weekday cafe energy`;
-  if (pull.includes("seafood") || pull.includes("crab")) return `${place} is getting more seafood dinner talk`;
-  if (pull.includes("bbq") || pull.includes("korean")) return `${place} is showing more Korean group-dinner energy`;
-  return `${place} is standing out in ${category}`;
-}
+function signatureDish(signal: Signal) {
+  const category = categoryForSignal(signal);
+  const explicitSignature = textEvidence(signal, "signature_item");
+  if (explicitSignature) {
+    return normalizeFoodCue(explicitSignature, category.key) || fallbackCueForCategory(category.key);
+  }
 
-function signalPull(signal: Signal) {
+  const cuisine = textEvidence(signal, "food_or_cuisine_type");
+  if (cuisine) {
+    const cuisineCue = normalizeFoodCue(cuisine, category.key);
+    if (cuisineCue) {
+      return cuisineCue;
+    }
+  }
+
+  const hookDish = dishFromText(`${textEvidence(signal, "reader_hook")} ${textEvidence(signal, "what_to_notice")}`);
+  if (hookDish) {
+    return hookDish;
+  }
+
   const keywords = (signal.evidence.keywords ?? []).map((keyword) => keyword.toLowerCase());
-  const nameText = signal.place.name.toLowerCase();
-  const titleText = `${signal.title} ${signal.summary}`.toLowerCase();
-  const haystack = `${nameText} ${titleText} ${keywords.join(" ")}`;
-
-  if (haystack.includes("wing")) return "chicken wings and group-dinner energy";
-  if (haystack.includes("crab") || haystack.includes("seafood") || haystack.includes("boil")) return "crab boil, spicy seafood, and group dinner";
-  if (haystack.includes("bbq") || haystack.includes("korean")) return "Korean BBQ, tofu, and group meals";
-  if (haystack.includes("coffee") || haystack.includes("cafe") || haystack.includes("wifi")) return "coffee, wifi, and longer sit-down visits";
-  if (haystack.includes("wait") || haystack.includes("line")) return "waits, lines, and slower dinner pacing";
-  if (haystack.includes("tofu")) return "tofu, Korean comfort food, and dinner traffic";
-  if (haystack.includes("dessert") || haystack.includes("cake") || haystack.includes("bakery")) return "dessert and casual sweet stops";
-  return `${readerCategory(signal).toLowerCase()} food pull`;
+  const haystack = `${signal.place.name} ${signal.title} ${signal.summary} ${keywords.join(" ")}`.toLowerCase();
+  if (haystack.includes("donkatsu") || haystack.includes("tonkatsu")) return "Donkatsu";
+  if (haystack.includes("doner") || haystack.includes("döner")) return "Doner";
+  if (haystack.includes("pizza")) return "Pizza";
+  if (haystack.includes("pancake")) return "Pancakes";
+  if (haystack.includes("benedict")) return "Eggs benedict";
+  if (haystack.includes("wing")) return "Chicken wings";
+  if (haystack.includes("crab") || haystack.includes("boil")) return "Crab boil";
+  if (haystack.includes("seafood")) return "Spicy seafood";
+  if (haystack.includes("bbq")) return "Korean BBQ";
+  if (haystack.includes("tofu") || haystack.includes("soondubu")) return "Soondubu";
+  if (haystack.includes("coffee") || haystack.includes("espresso") || haystack.includes("latte")) return "Coffee";
+  if (haystack.includes("matcha")) return "Matcha";
+  if (haystack.includes("cake")) return "Cake";
+  if (haystack.includes("bakery") || haystack.includes("bread") || haystack.includes("croissant")) return "Bakery";
+  if (haystack.includes("dessert")) return "Dessert";
+  return fallbackCueForCategory(category.key);
 }
 
-function plainReaderSummary(signal: Signal) {
+function fallbackPlaceSummary(signal: Signal) {
+  const llmReason = conciseText(textEvidence(signal, "place_anchor_reason") || textEvidence(signal, "best_read_as") || textEvidence(signal, "good_for"), 150);
+  if (llmReason) {
+    return llmReason;
+  }
+
+  const dish = signatureDish(signal).toLowerCase();
   const place = cleanPlaceName(signal.place.name);
-  return `${place} is showing more local talk around ${signalPull(signal)}.`;
+  if (dish.includes("donkatsu")) return `${place} is useful when you want a crisp Japanese comfort-food plate.`;
+  if (dish.includes("doner")) return `${place} is useful for a quick Mediterranean-style meal that still feels specific.`;
+  if (dish.includes("pizza")) return `${place} is useful when pizza is the whole plan, not a fallback.`;
+  if (dish.includes("pancake") || dish.includes("benedict")) return `${place} is useful for a brunch-leaning meal or cafe-grill comfort food.`;
+  if (dish.includes("crab") || dish.includes("seafood")) return `${place} is useful when you want a bigger, messier seafood dinner with spice.`;
+  if (dish.includes("bbq") || dish.includes("soondubu")) return `${place} is useful for Korean comfort food or a table built around sharing.`;
+  if (dish.includes("coffee") || dish.includes("matcha")) return `${place} is useful for a cafe stop that can stretch beyond a quick drink.`;
+  if (dish.includes("cake") || dish.includes("bakery") || dish.includes("dessert")) return `${place} is useful for a sweet stop that does not need a full dinner plan.`;
+  if (dish.includes("wing")) return `${place} is useful for a casual group order built around wings.`;
+  return `${place} is useful because the clearest signal is about what people may actually want to eat there.`;
 }
 
-function goodFor(signal: Signal) {
-  const pull = signalPull(signal).toLowerCase();
-  if (pull.includes("crab") || pull.includes("seafood")) return "a group dinner when you want bold seafood instead of a quick bite";
-  if (pull.includes("bbq") || pull.includes("tofu") || pull.includes("korean")) return "a Korean food night, especially if you are choosing for a group";
-  if (pull.includes("coffee") || pull.includes("wifi")) return "a longer cafe stop, laptop time, or a calmer weekday meet-up";
-  if (pull.includes("wait") || pull.includes("line")) return "a slower dinner plan where waiting a bit would not ruin the night";
-  if (pull.includes("dessert")) return "an after-dinner stop or a low-commitment sweet craving";
-  return "deciding what nearby food lane feels more alive this week";
+function placeSummary(signal: Signal) {
+  const explicit = conciseText(textEvidence(signal, "place_summary") || textEvidence(signal, "place_anchor_reason"), 150);
+  if (explicit) {
+    return explicit;
+  }
+  return fallbackPlaceSummary(signal);
 }
 
-function whatChanged(signal: Signal) {
-  const pull = signalPull(signal).toLowerCase();
-  const place = cleanPlaceName(signal.place.name);
-  if (pull.includes("crab") || pull.includes("seafood")) return `${place} has more local talk around crab boil, spice, and seafood dinners.`;
-  if (pull.includes("bbq") || pull.includes("korean")) return `${place} has more local talk around Korean food and group-meal occasions.`;
-  if (pull.includes("coffee") || pull.includes("wifi")) return `${place} has more local talk around quiet cafe use and longer stays.`;
-  if (pull.includes("wait") || pull.includes("line")) return `${place} has more local talk around waits, lines, and dinner pacing.`;
-  if (pull.includes("dessert")) return `${place} has more local talk around sweet stops and casual visits.`;
-  return `${place} has a small shift in how locals describe the visit.`;
+function signalSummary(signal: Signal) {
+  const changed = evidenceList(signal, "what_changed");
+  const explicit = conciseText(changed[0] || textEvidence(signal, "what_to_notice") || textEvidence(signal, "reader_hook") || signal.summary, 150);
+  if (explicit) {
+    return explicit;
+  }
+  return `${cleanPlaceName(signal.place.name)} has a current food signal in the ${readerCategory(signal).toLowerCase()} lane.`;
+}
+
+function categoryForSignal(signal: Signal) {
+  const displayCategory = textEvidence(signal, "display_category");
+  if (displayCategory) {
+    const configured = FOOD_CATEGORIES.find((category) => category.label.toLowerCase() === displayCategory.toLowerCase() || category.key === categoryKeyForLabel(displayCategory));
+    if (configured) {
+      return configured;
+    }
+  }
+
+  const cuisine = cuisineType(signal);
+  const cuisineCategory = categoryFromCuisine(cuisine) || categoryFromCuisine(textEvidence(signal, "food_or_cuisine_type"));
+  if (cuisineCategory) {
+    return cuisineCategory;
+  }
+
+  const haystack = [
+    signal.place.name,
+    signal.place.category,
+    signal.title,
+    signal.summary,
+    cuisine,
+    textEvidence(signal, "food_or_cuisine_type"),
+    textEvidence(signal, "reader_hook"),
+    textEvidence(signal, "what_to_notice"),
+    ...(signal.evidence.keywords ?? [])
+  ].join(" ").toLowerCase();
+
+  return CATEGORY_MATCH_ORDER.map(categoryByKey).find((category) => hasFoodTerm(haystack, category.terms)) ?? dinnerCategory();
 }
 
 function readerCategory(signal: Signal) {
-  const cuisine = cuisineType(signal);
-  const haystack = `${signal.place.name} ${signal.title} ${signal.summary} ${(signal.evidence.keywords ?? []).join(" ")}`.toLowerCase();
-  if (haystack.includes("coffee") || haystack.includes("cafe") || cuisine.toLowerCase().includes("cafe")) return "Coffee / work-friendly cafes";
-  if (haystack.includes("bbq") || haystack.includes("tofu") || haystack.includes("korean") || cuisine.toLowerCase().includes("korean")) return "Korean BBQ & tofu";
-  if (haystack.includes("seafood") || haystack.includes("crab") || haystack.includes("boil")) return "Spicy seafood";
-  if (haystack.includes("dessert") || haystack.includes("bakery") || haystack.includes("cake")) return "Dessert stops";
-  if (haystack.includes("wait") || haystack.includes("line")) return "Dinner waits";
-  return cuisine || "Food";
+  return categoryForSignal(signal).label;
 }
 
 function categoryDescription(label: string, count: number) {
   const suffix = `${count} card${count === 1 ? "" : "s"} to open when that sounds like the night you want.`;
-  if (label === "Coffee / work-friendly cafes") return `Coffee, wifi, quieter weekdays, and longer sit-down visits. ${suffix}`;
-  if (label === "Korean BBQ & tofu") return `BBQ, tofu, group meals, and Korean comfort-food nights. ${suffix}`;
-  if (label === "Spicy seafood") return `Crab boil, seafood, spice, and bigger dinner flavors. ${suffix}`;
-  if (label === "Dessert stops") return `Sweet stops, bakery runs, and casual after-meal visits. ${suffix}`;
-  if (label === "Dinner waits") return `Waits, lines, and slower dinner expectations. ${suffix}`;
-  return `A few local food cards in this lane. ${suffix}`;
+  const category = FOOD_CATEGORIES.find((candidate) => candidate.label === label);
+  return `${category?.description ?? "A few local food cards in this lane."} ${suffix}`;
+}
+
+function categoryWhy(label: string, signal: Signal) {
+  const dish = signatureDish(signal);
+  if (label === "Cafe") return `${dish} is worth a look when you want something slower than a grab-and-go coffee.`;
+  if (label === "Night stay") return `${dish} is worth a look when the plan is to linger after dinner.`;
+  if (label === "Korean") return `${dish} is worth a look for comfort food, sharing, or a group table.`;
+  if (label === "Seafood") return `${dish} is worth a look when spice and a bigger dinner are the point.`;
+  if (label === "Dessert") return `${dish} is worth a look for an easy sweet stop.`;
+  if (label === "Dinner") return `${dish} is worth a look if you are okay planning around a slower meal.`;
+  if (label === "Japanese") return `${dish} is worth a look when you want a focused comfort-food plate.`;
+  if (label === "Mediterranean") return `${dish} is worth a look for a quick meal with a specific craving attached.`;
+  if (label === "Pizza") return `${dish} is worth a look when pizza is the plan.`;
+  if (label === "Brunch") return `${dish} is worth a look for a brunch-leaning stop.`;
+  return `${dish} is worth a look because it is the clearest food-specific signal here.`;
+}
+
+function placeArea(signal: Signal) {
+  const neighborhood = signal.place.neighborhood?.trim();
+  if (neighborhood && neighborhood !== signal.city) {
+    return `${neighborhood}, ${signal.city}`;
+  }
+  return signal.city;
+}
+
+function dinnerCategory() {
+  return FOOD_CATEGORIES.find((category) => category.key === "dinner") ?? FOOD_CATEGORIES[FOOD_CATEGORIES.length - 1];
+}
+
+function categoryByKey(key: FoodCategoryKey) {
+  return FOOD_CATEGORIES.find((category) => category.key === key) ?? dinnerCategory();
+}
+
+function categoryFromCuisine(value: string) {
+  const cuisine = value.toLowerCase();
+  if (!cuisine || isGenericFoodLabel(cuisine)) {
+    return null;
+  }
+  if (cuisine.includes("korean")) return categoryByKey("korean");
+  if (cuisine.includes("japanese")) return categoryByKey("japanese");
+  if (cuisine.includes("seafood") || cuisine.includes("cajun")) return categoryByKey("seafood");
+  if (cuisine.includes("pizza")) return categoryByKey("pizza");
+  if (cuisine.includes("cafe") || cuisine.includes("coffee")) return categoryByKey("cafe");
+  if (cuisine.includes("mediterranean") || cuisine.includes("turkish")) return categoryByKey("mediterranean");
+  return null;
+}
+
+function dishFromText(value: string) {
+  const text = value.toLowerCase();
+  const dishes: Array<[string, string[]]> = [
+    ["Crab boil", ["crab boil", "crab", "seafood boil"]],
+    ["Korean BBQ", ["korean bbq", "bbq", "all you can eat"]],
+    ["Donkatsu", ["donkatsu", "tonkatsu"]],
+    ["Doner", ["doner", "döner"]],
+    ["Pizza", ["pizza"]],
+    ["Pancakes", ["pancake", "pancakes"]],
+    ["Eggs benedict", ["benedict"]],
+    ["Coffee", ["coffee", "espresso", "latte"]],
+    ["Matcha", ["matcha"]]
+  ];
+  return dishes.find(([, terms]) => terms.some((term) => text.includes(term)))?.[0] ?? "";
+}
+
+function normalizeFoodCue(value: string, categoryKey: FoodCategoryKey) {
+  const cue = conciseText(value, 34);
+  const lowerCue = cue.toLowerCase();
+  if (!cue || isGenericFoodLabel(lowerCue)) {
+    return "";
+  }
+  if (lowerCue.includes("korean bbq") || lowerCue === "bbq" || lowerCue.includes("all you can eat")) return "Korean BBQ";
+  if (lowerCue.includes("korean restaurant") || lowerCue === "korean") return "Korean food";
+  if (lowerCue.includes("japanese restaurant") || lowerCue === "japanese") return "Japanese comfort food";
+  if (lowerCue.includes("seafood restaurant") || lowerCue === "seafood") return "Seafood dinner";
+  if (lowerCue.includes("mediterranean restaurant") || lowerCue === "mediterranean") return "Mediterranean food";
+  if (lowerCue.includes("cafe") || lowerCue === "coffee shop") return "Cafe stop";
+  if (lowerCue === "night stay" || lowerCue === "late night") return "Late dinner";
+  if (lowerCue === "dinner") return "Dinner plan";
+  if (lowerCue.endsWith(" restaurant")) return fallbackCueForCategory(categoryKey);
+  return cue;
+}
+
+function fallbackCueForCategory(categoryKey: FoodCategoryKey) {
+  const cues: Record<FoodCategoryKey, string> = {
+    korean: "Korean food",
+    japanese: "Japanese comfort food",
+    seafood: "Seafood dinner",
+    mediterranean: "Mediterranean food",
+    pizza: "Pizza",
+    cafe: "Cafe stop",
+    brunch: "Brunch plan",
+    dinner: "Dinner plan",
+    "night-stay": "Late dinner"
+  };
+  return cues[categoryKey];
+}
+
+function evidenceList(signal: Signal, key: string) {
+  const value = signal.evidence[key];
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  }
+  return [];
+}
+
+function conciseText(value: string, maxLength: number) {
+  const cleaned = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) {
+    return "";
+  }
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+  return `${cleaned.slice(0, maxLength - 1).trim()}...`;
+}
+
+function isGenericFoodLabel(value: string) {
+  return ["restaurant", "food", "local food signal", "cuisine"].includes(value.trim().toLowerCase());
+}
+
+function hasFoodTerm(text: string, terms: string[]) {
+  return terms.some((term) => new RegExp(`(^|[^a-z0-9])${escapeRegExp(term)}([^a-z0-9]|$)`, "i").test(text));
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function categoryKeyForLabel(label: string) {
+  const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  return key || "dinner";
 }
 
 function scopeSummary(report: Report) {
-  return `LocalSignal reads recent local food talk for ${report.region} and turns it into a weekly briefing: what people may want to eat, which places are involved, and which cards are worth opening for details.`;
+  return `A quick food-first read for ${report.region}: what kind of meal is worth considering, what to order, and which cards to open for details.`;
 }
 
 function cleanPlaceName(value: string) {
   return value
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
     .replace(/\s*\|.*$/, "")
     .replace(/\s*-\s*Cajun Seafood.*$/i, "")
     .replace(/\s+Nj\b/gi, "")
@@ -370,11 +536,11 @@ function naturalJoin(values: string[]) {
   return `${cleaned.slice(0, -1).join(", ")}, and ${cleaned[cleaned.length - 1]}`;
 }
 
-function sourceLineFor(signal: Signal, fallbackCategory: string) {
+function sourceLineFor(signal: Signal) {
   const mentions = mentionCountFor(signal);
   const sourceCount = Math.max(sourceCountFor(signal), 1);
   const notes = evidenceNotes(signal);
-  const category = placeIdentity(signal).cuisine || fallbackCategory;
+  const category = readerCategory(signal);
   const sourceText = sourceCount > 1 ? "a few local source paths" : "one local source path";
   const note = notes[0] ? ` ${notes[0]}` : "";
   const weight = mentions && mentions > 1 ? "More than one local note points this way." : "This is a light read, so open the card for context.";
@@ -386,19 +552,11 @@ function textEvidence(signal: Signal, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
-function uniquePlace(place: BriefingPlace, index: number, places: BriefingPlace[]) {
-  return places.findIndex((candidate) => candidate.name === place.name && candidate.area === place.area) === index;
-}
-
-function oneSentence(value: string) {
-  const first = value.split(/(?<=[.!?])\s+/)[0];
-  return first || value;
-}
-
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
     month: "short",
     day: "numeric",
-    year: "numeric"
+    year: "numeric",
+    timeZone: "UTC"
   }).format(new Date(value));
 }
