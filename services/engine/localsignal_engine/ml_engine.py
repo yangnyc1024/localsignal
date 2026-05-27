@@ -257,12 +257,12 @@ def _explain(
     area = place.neighborhood or place.city
     if signal_type == "sentiment_shift":
         return (
-            f"Wait-time talk is shifting at {place.name}" if topic == "Wait-time" else f"{topic} tone is shifting at {place.name}",
+            f"{place.name} has a changing wait-time read" if topic == "Wait-time" else f"{place.name} has a changing {topic.lower()} read",
             f"Recent language around {keyword_text} is moving differently from the short-term baseline.",
         )
     if signal_type == "behavior_shift":
         return (
-            f"{topic} use is changing at {place.name}",
+            f"{place.name} has a changing {topic.lower()} visit read",
             f"Recent mentions across {source_count} source(s) increasingly point to {keyword_text}.",
         )
     if signal_type == "review_velocity_spike":
@@ -273,15 +273,15 @@ def _explain(
             )
         if velocity_ratio >= 5:
             return (
-                f"{topic} keeps coming up at {place.name}",
+                f"{place.name} is getting more recent attention for {topic.lower()}",
                 f"Recent mentions are materially above the short-term baseline, led by language around {keyword_text}.",
             )
         return (
-            f"{topic} activity is picking up at {place.name}",
+            f"{place.name} is getting more recent attention for {topic.lower()}",
             f"Recent activity is moving ahead of baseline, with new keywords around {keyword_text}.",
         )
     return (
-        f"{topic} is becoming the repeated clue at {place.name}",
+        f"{place.name} is showing repeated language around {topic.lower()}",
         f"The strongest new language this week centers on {keyword_text}, across {source_count} source(s).",
     )
 

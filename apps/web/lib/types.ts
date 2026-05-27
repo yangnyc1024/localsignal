@@ -25,6 +25,8 @@ export type Signal = {
   evidence: {
     keywords?: string[];
     sources?: string[];
+    place_profile?: PlaceProfile;
+    food_signal?: FoodSignal;
     review_velocity?: number;
     velocity_ratio?: number;
     mention_count?: number;
@@ -38,6 +40,27 @@ export type Signal = {
   city: string;
   week_start: string;
   place: Place;
+};
+
+export type PlaceProfile = {
+  known_for?: string;
+  food_types?: string[];
+  signature_items?: string[];
+  flavor_cues?: string[];
+  occasions?: string[];
+  caveats?: string;
+  source_count?: number;
+};
+
+export type FoodSignal = {
+  summary?: string;
+  primary_pull?: string;
+  flavor_cue?: string;
+  occasion?: string;
+  confidence?: "High" | "Medium" | "Low" | string;
+  evidence_basis?: string;
+  image_query?: string;
+  image_alt?: string;
 };
 
 export type Report = {
@@ -109,8 +132,29 @@ export type SignalDetail = Signal & {
   confidence_reason: string;
   baseline_context: BaselineContext;
   metrics: SignalMetric[];
+  restaurant_brief?: RestaurantBrief | null;
+  food_facts?: FoodFact[];
   evidence_items: SignalEvidenceItem[];
   related_signals: RelatedSignal[];
+};
+
+export type FoodFact = {
+  fact_type: "dish" | "occasion" | "behavior";
+  fact_value: string;
+  evidence_text: string;
+  source: string;
+  source_url?: string | null;
+  confidence: number;
+  occurred_at?: string | null;
+};
+
+export type RestaurantBrief = {
+  what_it_is: string;
+  official_context_note: string;
+  signature_menu_items: string[];
+  location_format: string;
+  source_chips: string[];
+  trust_note: string;
 };
 
 export type BaselineContext = {

@@ -107,7 +107,7 @@ export type LocalBriefing = {
   sources: BriefingSource[];
 };
 
-export type ReaderSignalCard = {
+export type BriefingSignalCard = {
   place: string;
   area: string;
   category: string;
@@ -129,7 +129,7 @@ export type CategorySignalSection = {
   key: string;
   label: string;
   description: string;
-  cards: ReaderSignalCard[];
+  cards: BriefingSignalCard[];
 };
 
 export type BriefingSource = {
@@ -141,6 +141,7 @@ export type BriefingSource = {
 export function buildLocalBriefing(report: Report): LocalBriefing {
   const sortedSignals = [...report.signals].sort((left, right) => right.score - left.score);
   const topCards = sortedSignals.slice(0, 3).map(signalCardFor);
+  const llmBriefing = report.briefing;
 
   if (!sortedSignals.length) {
     return {
@@ -161,13 +162,13 @@ export function buildLocalBriefing(report: Report): LocalBriefing {
     eyebrow: `${formatDate(report.week_start)} · ${report.region}`,
     scopeTitle: "This is a weekly local food briefing",
     scopeSummary: scopeSummary(report),
-    title: weeklyReaderTitle(topCards),
-    subtitle: weeklyReaderSubtitle(topCards),
-    whyItMatters: weeklyReaderWhy(),
-    foodReads: foodReadsFor(sortedSignals),
+    title: llmBriefing?.title || briefingFallbackTitle(topCards),
+    subtitle: llmBriefing?.subtitle || briefingFallbackSubtitle(topCards),
+    whyItMatters: llmBriefing?.why_it_matters || briefingFallbackWhy(),
+    foodReads: briefingFoodReads(report) || foodReadsFor(sortedSignals),
     longTermSignals: longTermSignalsFor(sortedSignals),
     categorySections: categorySectionsFor(sortedSignals),
-    sources: sortedSignals.slice(0, 6).map((signal) => ({
+    sources: briefingSources(report) || sortedSignals.slice(0, 6).map((signal) => ({
       label: signal.place.name,
       detail: sourceLineFor(signal),
       href: `/signal/${signal.slug}`
@@ -175,22 +176,64 @@ export function buildLocalBriefing(report: Report): LocalBriefing {
   };
 }
 
-function weeklyReaderTitle(topCards: ReaderSignalCard[]) {
-  const categories = [...new Set(topCards.map((signal) => signal.category))].slice(0, 3);
-  return `This week: ${naturalJoin(categories)}`;
+function briefingFoodReads(report: Report) {
+  const places = report.briefing?.places_involved;
+  if (!places?.length) {
+    return null;
+  }
+  const reads = places
+    .map((place) => {
+      const signal = report.signals.find((item) => item.slug === place.signal_slug);
+      if (!signal) {
+        return null;
+      }
+      return {
+        label: place.category || place.name,
+        why: place.reason,
+        href: `/signal/${signal.slug}`
+      };
+    })
+    .filter((read): read is FoodRead => Boolean(read));
+  return reads.length ? reads.slice(0, 3) : null;
 }
 
-function weeklyReaderSubtitle(topCards: ReaderSignalCard[]) {
+function briefingSources(report: Report) {
+  const sources = report.briefing?.sources;
+  if (!sources?.length) {
+    return null;
+  }
+  const rows = sources
+    .map((source) => {
+      const signal = report.signals.find((item) => item.slug === source.signal_slug);
+      if (!signal) {
+        return null;
+      }
+      return {
+        label: source.label,
+        detail: source.detail,
+        href: `/signal/${signal.slug}`
+      };
+    })
+    .filter((source): source is BriefingSource => Boolean(source));
+  return rows.length ? rows.slice(0, 6) : null;
+}
+
+function briefingFallbackTitle(topCards: BriefingSignalCard[]) {
+  const categories = [...new Set(topCards.map((signal) => signal.category))].slice(0, 3);
+  return `Food read: ${naturalJoin(categories)}`;
+}
+
+function briefingFallbackSubtitle(topCards: BriefingSignalCard[]) {
   const foods = naturalJoin([...new Set(topCards.map((signal) => signal.signatureDish))].slice(0, 3));
   return `A simpler read: these are the food lanes showing up most clearly, starting with ${foods}.`;
 }
 
-function weeklyReaderWhy() {
+function briefingFallbackWhy() {
   return "Worth caring about because the signal is attached to actual food choices, not generic buzz: what to order, what kind of stop it fits, and which place has the clearest evidence card.";
 }
 
 function categorySectionsFor(signals: Signal[]) {
-  const groups = new Map<FoodCategoryKey, ReaderSignalCard[]>();
+  const groups = new Map<FoodCategoryKey, BriefingSignalCard[]>();
   for (const signal of signals) {
     const category = categoryForSignal(signal);
     const existing = groups.get(category.key) ?? [];
@@ -250,7 +293,7 @@ function longTermSignalsFor(signals: Signal[]): LongTermSignalCard[] {
   }).slice(0, 8);
 }
 
-function signalCardFor(signal: Signal): ReaderSignalCard {
+function signalCardFor(signal: Signal): BriefingSignalCard {
   const category = categoryForSignal(signal);
   return {
     place: cleanPlaceName(signal.place.name),

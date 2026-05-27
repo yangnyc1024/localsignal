@@ -155,6 +155,54 @@ CREATE TABLE IF NOT EXISTS baseline_profiles (
   last_updated TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS place_documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  place_id UUID NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+  source TEXT NOT NULL,
+  source_url TEXT,
+  title TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  occurred_at TIMESTAMPTZ,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  embedding vector(1536),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS place_profiles (
+  place_id UUID PRIMARY KEY REFERENCES places(id) ON DELETE CASCADE,
+  known_for TEXT NOT NULL DEFAULT '',
+  food_types TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  signature_items TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  flavor_cues TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  occasions TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  caveats TEXT NOT NULL DEFAULT '',
+  source_count INTEGER NOT NULL DEFAULT 0,
+  profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS place_food_facts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  place_id UUID NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+  source_document_id UUID REFERENCES place_documents(id) ON DELETE SET NULL,
+  fact_type TEXT NOT NULL CHECK (fact_type IN ('dish', 'occasion', 'behavior')),
+  fact_value TEXT NOT NULL,
+  normalized_value TEXT NOT NULL,
+  evidence_text TEXT NOT NULL,
+  source TEXT NOT NULL,
+  source_url TEXT,
+  occurred_at TIMESTAMPTZ,
+  confidence NUMERIC(5, 4) NOT NULL DEFAULT 0.5,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  evidence_hash TEXT NOT NULL,
+  embedding vector(1536),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS pipeline_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   step TEXT NOT NULL,
@@ -268,3 +316,15 @@ CREATE INDEX IF NOT EXISTS idx_evidence_chunks_place_time ON evidence_chunks(pla
 CREATE INDEX IF NOT EXISTS idx_signal_candidates_status_score ON signal_candidates(status, candidate_score DESC);
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_step_started ON pipeline_runs(step, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_baseline_profiles_heat ON baseline_profiles(baseline_heat_score DESC);
+CREATE INDEX IF NOT EXISTS idx_place_documents_place_type ON place_documents(place_id, content_type);
+CREATE INDEX IF NOT EXISTS idx_place_documents_place_fetched ON place_documents(place_id, fetched_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_place_documents_unique_source
+  ON place_documents(place_id, source, source_url, content_type)
+  WHERE source_url IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_place_documents_embedding_hnsw
+  ON place_documents USING hnsw (embedding vector_cosine_ops)
+  WHERE embedding IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_place_food_facts_place_type ON place_food_facts(place_id, fact_type, confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_place_food_facts_value ON place_food_facts(normalized_value);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_place_food_facts_unique_evidence
+  ON place_food_facts(place_id, fact_type, normalized_value, evidence_hash);

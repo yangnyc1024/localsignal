@@ -131,6 +131,8 @@ def llm_signal_json_schema() -> dict[str, Any]:
             "watch_out",
             "best_read_as",
             "evidence_receipt",
+            "place_profile",
+            "food_signal",
             "evidence_ids",
         ],
         "properties": {
@@ -162,6 +164,35 @@ def llm_signal_json_schema() -> dict[str, Any]:
                     "evidence_read": {"type": "string"}
                 }
             },
+            "place_profile": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["known_for", "food_types", "signature_items", "flavor_cues", "occasions", "caveats", "source_count"],
+                "properties": {
+                    "known_for": {"type": "string"},
+                    "food_types": {"type": "array", "items": {"type": "string"}},
+                    "signature_items": {"type": "array", "items": {"type": "string"}},
+                    "flavor_cues": {"type": "array", "items": {"type": "string"}},
+                    "occasions": {"type": "array", "items": {"type": "string"}},
+                    "caveats": {"type": "string"},
+                    "source_count": {"type": "integer"}
+                }
+            },
+            "food_signal": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["summary", "primary_pull", "flavor_cue", "occasion", "confidence", "evidence_basis", "image_query", "image_alt"],
+                "properties": {
+                    "summary": {"type": "string"},
+                    "primary_pull": {"type": "string"},
+                    "flavor_cue": {"type": "string"},
+                    "occasion": {"type": "string"},
+                    "confidence": {"type": "string", "enum": ["High", "Medium", "Low"]},
+                    "evidence_basis": {"type": "string"},
+                    "image_query": {"type": "string"},
+                    "image_alt": {"type": "string"}
+                }
+            },
             "evidence_ids": {"type": "array", "items": {"type": "string"}},
         },
     }
@@ -177,6 +208,9 @@ def build_llm_prompt(place: dict, candidate: dict, evidence_chunks: list[dict]) 
             "Write the title as a food/local phenomenon first, not a place-first claim.",
             "Use the place only as an anchor where activity is showing up.",
             "Include reader_hook, what_to_notice, skeptic_note, good_for, watch_out, best_read_as, place_anchor_reason, food_or_cuisine_type, and evidence_receipt for reader framing.",
+            "Also produce place_profile and food_signal.",
+            "food_signal should name the food, flavor, or occasion pulling the current signal. If food-level evidence is thin, say so and lower confidence.",
+            "For food_signal.image_query, write a short visual food query, not a URL.",
             "Make card-level fields distinct: reader_hook should name the concrete dish, behavior, scene, or uncertainty; what_to_notice should not repeat the title; skeptic_note should state the main limitation calmly.",
             "Output valid JSON only.",
         ],

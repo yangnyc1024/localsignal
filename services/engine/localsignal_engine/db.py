@@ -1105,17 +1105,17 @@ def _story_fields_for_signal(signal: Signal) -> dict:
     source_count = int(evidence.get("source_count") or len(evidence.get("sources", [])) or 0)
     mention_count = int(evidence.get("current_mention_count") or evidence.get("mention_count") or 0)
     if signal.signal_type == "sentiment_shift":
-        phenomenon_title = f"Wait-time talk is shifting at {signal.place.name}" if topic == "Wait-time" else f"{topic} tone is shifting at {signal.place.name}"
+        phenomenon_title = f"{signal.place.name} has a changing wait-time read" if topic == "Wait-time" else f"{signal.place.name} has a changing {topic.lower()} read"
     elif signal.signal_type == "behavior_shift":
-        phenomenon_title = f"{topic} use is changing at {signal.place.name}"
+        phenomenon_title = f"{signal.place.name} has a changing {topic.lower()} visit read"
     elif signal.signal_type == "review_velocity_spike":
-        phenomenon_title = f"{topic} activity is picking up at {signal.place.name}" if topic == category else f"{topic} keeps coming up at {signal.place.name}"
+        phenomenon_title = f"{signal.place.name} is getting more recent attention for {topic.lower()}"
     else:
-        phenomenon_title = f"{topic} is becoming the repeated clue at {signal.place.name}"
+        phenomenon_title = f"{signal.place.name} is showing repeated language around {topic.lower()}"
     return {
         "phenomenon_title": phenomenon_title,
         "food_or_cuisine_type": category,
-        "place_anchor_reason": f"{signal.place.name} is the place where this activity is anchored, not a blanket recommendation.",
+        "place_anchor_reason": f"{signal.place.name} is the place where this food read is anchored, not a blanket recommendation.",
         "reader_hook": phenomenon_title,
         "what_to_notice": f"Watch the repeated language around {keyword_text}; do not read this as a best-of ranking.",
         "skeptic_note": "Evidence is still narrow until it repeats across more independent sources.",

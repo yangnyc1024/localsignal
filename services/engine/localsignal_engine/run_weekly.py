@@ -18,6 +18,14 @@ from localsignal_engine.email import send_latest_digest
 from localsignal_engine.ingestion.live import fetch_live_mentions, fetch_social_metadata_items
 from localsignal_engine.llm import enrich_report_signals_with_llm
 from localsignal_engine.ml_engine import generate_report_signals
+from localsignal_engine.place_knowledge import (
+    build_food_intelligence_documents,
+    build_restaurant_brief_documents,
+    embed_place_documents,
+    ingest_google_place_documents,
+    ingest_website_documents,
+    sync_existing_evidence_documents,
+)
 
 
 def run_once() -> None:
@@ -59,6 +67,9 @@ def run_once() -> None:
 
         report_id = write_weekly_report(signals)
         linked_count = link_evidence_chunks_to_signals()
+        place_knowledge_metrics = (
+            _refresh_place_knowledge(signals) if _place_knowledge_weekly_enabled() else {"enabled": False}
+        )
         baseline_count = _compute_baselines(places)
         llm_metrics = enrich_report_signals_with_llm(report_id) if _llm_enrichment_enabled() else {"enabled": False}
         delivery_count = send_latest_digest() if _send_digest_enabled() else 0
@@ -76,7 +87,7 @@ def run_once() -> None:
             f"{social_mentions_count} social mentions, {social_chunk_count} social evidence chunks, "
             f"{social_review_count} social review items, {social_unresolved_count} unresolved social items, "
             f"linked {linked_count} evidence rows, updated {baseline_count} baselines, "
-            f"LLM enrichment {llm_metrics}, "
+            f"place knowledge {place_knowledge_metrics}, LLM enrichment {llm_metrics}, "
             f"and queued {delivery_count} digest deliveries."
         )
     except Exception as exc:
@@ -110,6 +121,47 @@ def _send_digest_enabled() -> bool:
 
 def _llm_enrichment_enabled() -> bool:
     return os.getenv("LLM_ENRICH_WEEKLY", "true").lower() == "true"
+
+
+def _place_knowledge_weekly_enabled() -> bool:
+    return os.getenv("PLACE_KNOWLEDGE_WEEKLY_ENABLED", "true").lower() == "true"
+
+
+def _place_knowledge_google_enabled() -> bool:
+    return os.getenv("PLACE_KNOWLEDGE_GOOGLE_ENABLED", "true").lower() == "true"
+
+
+def _place_knowledge_website_enabled() -> bool:
+    return os.getenv("PLACE_KNOWLEDGE_WEBSITE_ENABLED", "true").lower() == "true"
+
+
+def _place_knowledge_embed_enabled() -> bool:
+    return os.getenv("PLACE_KNOWLEDGE_EMBED_ENABLED", "true").lower() == "true"
+
+
+def _refresh_place_knowledge(signals) -> dict:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return {"enabled": False, "reason": "missing_database_url"}
+    place_ids = sorted({signal.place.id for signal in signals if signal.place and signal.place.id})
+    if not place_ids:
+        return {"enabled": True, "places": 0}
+
+    metrics: dict[str, object] = {"enabled": True, "places": len(place_ids)}
+    try:
+        with psycopg.connect(database_url) as conn:
+            metrics["evidence_documents"] = sync_existing_evidence_documents(conn, place_ids)
+            if _place_knowledge_google_enabled():
+                metrics["google_documents"] = ingest_google_place_documents(conn, place_ids)
+            if _place_knowledge_website_enabled():
+                metrics["website_documents"] = ingest_website_documents(conn, place_ids)
+            metrics["food_intelligence"] = build_food_intelligence_documents(conn, place_ids)
+            metrics["restaurant_brief_documents"] = build_restaurant_brief_documents(conn, place_ids)
+            if _place_knowledge_embed_enabled():
+                metrics["embedded_documents"] = embed_place_documents(conn, place_ids)
+    except Exception as exc:
+        metrics["error"] = str(exc)
+    return metrics
 
 
 def _compute_baselines(places) -> int:
