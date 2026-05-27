@@ -13,6 +13,7 @@ from app.models import (
     FeedbackCreate,
     FeedbackDTO,
     EmailDeliveryDTO,
+    FoodFactDTO,
     ReportDTO,
     IngestionRunDTO,
     AlwaysHotDTO,
@@ -71,6 +72,17 @@ def list_signals(
           s.city,
           s.week_start::text AS week_start,
           json_build_object(
+            'known_for', COALESCE(pp.known_for, ''),
+            'food_types', COALESCE(pp.food_types, ARRAY[]::TEXT[]),
+            'signature_items', COALESCE(pp.signature_items, ARRAY[]::TEXT[]),
+            'flavor_cues', COALESCE(pp.flavor_cues, ARRAY[]::TEXT[]),
+            'occasions', COALESCE(pp.occasions, ARRAY[]::TEXT[]),
+            'caveats', COALESCE(pp.caveats, ''),
+            'source_count', COALESCE(pp.source_count, 0),
+            'profile', COALESCE(pp.profile, '{}'::jsonb),
+            'updated_at', pp.updated_at::text
+          ) AS place_profile,
+          json_build_object(
             'id', p.id,
             'name', p.name,
             'address', p.address,
@@ -84,6 +96,7 @@ def list_signals(
           ) AS place
         FROM signals s
         JOIN places p ON p.id = s.place_id
+        LEFT JOIN place_profiles pp ON pp.place_id = p.id
         WHERE s.status = 'published'
           AND (%s::text IS NULL OR s.city = %s)
           AND (%s::text IS NULL OR p.category = %s)
@@ -97,22 +110,8 @@ def list_signals(
     return [_signal_row(row) for row in rows]
 
 
-@app.get("/api/signals", response_model=list[SignalDTO])
-def list_api_signals(
-    region: Optional[str] = None,
-    category: Optional[str] = None,
-    signal_type: Optional[str] = None,
-    time_window: Optional[str] = None,
-    limit: int = 50,
-    conn=Depends(get_connection),
-) -> list[dict]:
-    city = region if region in {"Fort Lee", "Edgewater", "Palisades Park"} else None
-    return list_signals(city, category, signal_type, time_window, limit, conn)
-
-
 @app.get("/reports/latest", response_model=ReportDTO)
 def latest_report(conn=Depends(get_connection)) -> dict:
-    _ensure_reports_briefing_column(conn)
     report = conn.execute(
         """
         SELECT id, title, region, week_start::text AS week_start, intro, briefing
@@ -139,6 +138,17 @@ def latest_report(conn=Depends(get_connection)) -> dict:
           s.city,
           s.week_start::text AS week_start,
           json_build_object(
+            'known_for', COALESCE(pp.known_for, ''),
+            'food_types', COALESCE(pp.food_types, ARRAY[]::TEXT[]),
+            'signature_items', COALESCE(pp.signature_items, ARRAY[]::TEXT[]),
+            'flavor_cues', COALESCE(pp.flavor_cues, ARRAY[]::TEXT[]),
+            'occasions', COALESCE(pp.occasions, ARRAY[]::TEXT[]),
+            'caveats', COALESCE(pp.caveats, ''),
+            'source_count', COALESCE(pp.source_count, 0),
+            'profile', COALESCE(pp.profile, '{}'::jsonb),
+            'updated_at', pp.updated_at::text
+          ) AS place_profile,
+          json_build_object(
             'id', p.id,
             'name', p.name,
             'address', p.address,
@@ -153,6 +163,7 @@ def latest_report(conn=Depends(get_connection)) -> dict:
         FROM report_signals rs
         JOIN signals s ON s.id = rs.signal_id
         JOIN places p ON p.id = s.place_id
+        LEFT JOIN place_profiles pp ON pp.place_id = p.id
         WHERE rs.report_id = %s
         ORDER BY rs.rank ASC
         """,
@@ -160,10 +171,6 @@ def latest_report(conn=Depends(get_connection)) -> dict:
     ).fetchall()
 
     return {**report, "signals": [_signal_row(signal) for signal in signals]}
-
-
-def _ensure_reports_briefing_column(conn) -> None:
-    conn.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS briefing JSONB NOT NULL DEFAULT '{}'::jsonb")
 
 
 @app.get("/api/baseline/always-hot", response_model=list[AlwaysHotDTO])
@@ -194,7 +201,6 @@ def always_hot(limit: int = 5, conn=Depends(get_connection)) -> list[dict]:
 
 @app.get("/api/source-health/social", response_model=list[SocialSourceRunDTO])
 def social_source_health(limit: int = 20, conn=Depends(get_connection)) -> list[dict]:
-    _ensure_social_source_runs_table(conn)
     rows = conn.execute(
         """
         SELECT
@@ -225,34 +231,6 @@ def social_source_health(limit: int = 20, conn=Depends(get_connection)) -> list[
     return [dict(row) for row in rows]
 
 
-def _ensure_social_source_runs_table(conn) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS social_source_runs (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          provider TEXT NOT NULL,
-          platform TEXT NOT NULL DEFAULT 'social_metadata',
-          dataset_id TEXT,
-          query TEXT,
-          status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
-          total_records INTEGER NOT NULL DEFAULT 0,
-          normalized_records INTEGER NOT NULL DEFAULT 0,
-          fresh_records INTEGER NOT NULL DEFAULT 0,
-          old_records_dropped INTEGER NOT NULL DEFAULT 0,
-          parsed_items INTEGER NOT NULL DEFAULT 0,
-          resolved_items INTEGER NOT NULL DEFAULT 0,
-          review_items INTEGER NOT NULL DEFAULT 0,
-          unresolved_items INTEGER NOT NULL DEFAULT 0,
-          source_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
-          error TEXT,
-          started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          finished_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-        """
-    )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_social_source_runs_finished ON social_source_runs(finished_at DESC)")
-
-
 @app.get("/signals/{slug}", response_model=SignalDetailDTO)
 def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
     rows = conn.execute(
@@ -277,6 +255,17 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
           s.week_start::text AS week_start,
           r.region,
           rs.rank,
+          json_build_object(
+            'known_for', COALESCE(pp.known_for, ''),
+            'food_types', COALESCE(pp.food_types, ARRAY[]::TEXT[]),
+            'signature_items', COALESCE(pp.signature_items, ARRAY[]::TEXT[]),
+            'flavor_cues', COALESCE(pp.flavor_cues, ARRAY[]::TEXT[]),
+            'occasions', COALESCE(pp.occasions, ARRAY[]::TEXT[]),
+            'caveats', COALESCE(pp.caveats, ''),
+            'source_count', COALESCE(pp.source_count, 0),
+            'profile', COALESCE(pp.profile, '{}'::jsonb),
+            'updated_at', pp.updated_at::text
+          ) AS place_profile,
           json_build_object(
             'status', COALESCE(bp.baseline_status, 'Quiet baseline'),
             'heat_score', COALESCE(bp.baseline_heat_score::float, 0),
@@ -304,6 +293,7 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
         JOIN signals s ON s.id = rs.signal_id
         JOIN places p ON p.id = s.place_id
         LEFT JOIN baseline_profiles bp ON bp.place_id = p.id
+        LEFT JOIN place_profiles pp ON pp.place_id = p.id
         ORDER BY r.week_start DESC, r.created_at DESC, rs.rank ASC
         """
     ).fetchall()
@@ -314,6 +304,24 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
 
     evidence = signal.get("evidence") or {}
     current_days = int(evidence.get("current_window_days") or 14)
+    restaurant_brief = _restaurant_brief(conn, signal["place"]["id"])
+    food_fact_rows = conn.execute(
+        """
+        SELECT
+          fact_type,
+          fact_value,
+          evidence_text,
+          source,
+          source_url,
+          confidence::float AS confidence,
+          occurred_at::text AS occurred_at
+        FROM place_food_facts
+        WHERE place_id = %s
+        ORDER BY fact_type, confidence DESC
+        LIMIT 20
+        """,
+        (signal["place"]["id"],),
+    ).fetchall()
     evidence_chunks = conn.execute(
         """
         SELECT
@@ -356,6 +364,36 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
             LIMIT 8
             """,
             (signal["place"]["id"], current_days),
+        ).fetchall()
+
+    if not evidence_chunks:
+        evidence_chunks = conn.execute(
+            """
+            SELECT
+              id::text AS id,
+              source AS platform,
+              COALESCE(occurred_at, fetched_at)::text AS timestamp,
+              content AS excerpt,
+              ARRAY[]::TEXT[] AS extracted_keywords,
+              metadata,
+              source_url,
+              '{}'::jsonb AS engagement_metrics,
+              '{}'::jsonb AS geo_metadata
+            FROM place_documents
+            WHERE place_id = %s
+              AND content_type IN ('signal_evidence', 'review', 'place_profile', 'official_description', 'menu', 'website')
+            ORDER BY
+              CASE content_type
+                WHEN 'signal_evidence' THEN 0
+                WHEN 'review' THEN 1
+                WHEN 'place_profile' THEN 2
+                WHEN 'official_description' THEN 3
+                ELSE 3
+              END,
+              COALESCE(occurred_at, fetched_at) DESC
+            LIMIT 8
+            """,
+            (signal["place"]["id"],),
         ).fetchall()
 
     related_rows = conn.execute(
@@ -405,14 +443,11 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
         "confidence_reason": signal.get("confidence_reason") or _confidence_reason(signal),
         "baseline_context": _baseline_context(signal),
         "metrics": signal.get("metrics") or _metrics(signal),
+        "restaurant_brief": restaurant_brief,
+        "food_facts": [dict(row) for row in food_fact_rows],
         "evidence_items": [_evidence_item(row, signal) for row in evidence_chunks],
         "related_signals": related,
     }
-
-
-@app.get("/api/signals/{slug}", response_model=SignalDetailDTO)
-def api_signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
-    return signal_detail(slug, conn)
 
 
 @app.post("/api/ingest/run", response_model=PipelineActionDTO)
@@ -828,14 +863,74 @@ def options_handler(path: str) -> Response:
 
 
 def _signal_row(row: dict) -> dict:
+    normalized = {**row}
+    evidence = {**(row.get("evidence") or {})}
+    place_profile = _place_profile_from_row(row)
+    if place_profile:
+        evidence["place_profile"] = place_profile
+    normalized["evidence"] = evidence
+    normalized.pop("place_profile", None)
     return {
-        **row,
+        **normalized,
         "slug": row.get("slug") or slugify(row["title"]),
         "momentum_driver": _momentum_driver(row),
         "evidence_assessment": _evidence_assessment(row),
         "confidence": row.get("confidence_level") or _confidence(row),
         "signal_strength": _signal_strength(row)[0],
         "signal_strength_reason": _signal_strength(row)[1],
+    }
+
+
+def _restaurant_brief(conn, place_id: str) -> Optional[dict]:
+    row = conn.execute(
+        """
+        SELECT metadata
+        FROM place_documents
+        WHERE place_id = %s
+          AND content_type = 'restaurant_brief'
+        ORDER BY fetched_at DESC
+        LIMIT 1
+        """,
+        (place_id,),
+    ).fetchone()
+    metadata = row["metadata"] if row else None
+    if not isinstance(metadata, dict) or not metadata.get("what_it_is"):
+        return None
+    return {
+        "what_it_is": metadata.get("what_it_is") or "",
+        "official_context_note": metadata.get("official_context_note") or "Official context, not signal evidence.",
+        "signature_menu_items": metadata.get("signature_menu_items") or [],
+        "location_format": metadata.get("location_format") or "",
+        "source_chips": metadata.get("source_chips") or [],
+        "trust_note": metadata.get("trust_note") or "Context only; recent movement is handled in the signal sections below.",
+    }
+
+
+def _place_profile_from_row(row: dict) -> Optional[dict]:
+    profile = row.get("place_profile")
+    if not isinstance(profile, dict):
+        return None
+
+    known_for = str(profile.get("known_for") or "").strip()
+    food_types = [item for item in profile.get("food_types", []) if item]
+    signature_items = [item for item in profile.get("signature_items", []) if item]
+    flavor_cues = [item for item in profile.get("flavor_cues", []) if item]
+    occasions = [item for item in profile.get("occasions", []) if item]
+    caveats = str(profile.get("caveats") or "").strip()
+    source_count = int(profile.get("source_count") or 0)
+    if not (known_for or food_types or signature_items or flavor_cues or occasions or caveats or source_count):
+        return None
+
+    return {
+        "known_for": known_for,
+        "food_types": food_types,
+        "signature_items": signature_items,
+        "flavor_cues": flavor_cues,
+        "occasions": occasions,
+        "caveats": caveats,
+        "source_count": source_count,
+        "profile": profile.get("profile") or {},
+        "updated_at": profile.get("updated_at"),
     }
 
 
@@ -1441,6 +1536,8 @@ def _write_generated_signal(conn, candidate: dict, llm_result: dict, evidence_ch
         "watch_out": llm_result.get("watch_out"),
         "best_read_as": llm_result.get("best_read_as"),
         "evidence_receipt": llm_result.get("evidence_receipt") or {},
+        "place_profile": llm_result.get("place_profile") or {},
+        "food_signal": llm_result.get("food_signal") or {},
     }
     row = conn.execute(
         """
