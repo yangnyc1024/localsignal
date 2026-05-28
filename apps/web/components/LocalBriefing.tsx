@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import type { Report } from "@/lib/types";
 import { FOOD_CATEGORIES, buildLocalBriefing } from "@/lib/briefing";
 import type { FoodCategoryKey } from "@/lib/briefing";
+import { SubscribeForm } from "@/components/SubscribeForm";
 
 type Props = {
   report: Report;
@@ -219,6 +220,18 @@ export function LocalBriefing({ report }: Props) {
           </div>
         </details>
       ) : null}
+
+      <div className="grid gap-4 border-t border-line pt-7 md:grid-cols-[1fr_auto]">
+        <div className="grid content-center gap-1">
+          <p className="text-sm font-semibold text-ink">Get this every week</p>
+          <p className="text-sm leading-6 text-ink/60">
+            Local food signals for Fort Lee, Edgewater, and Palisades Park — delivered to your inbox.
+          </p>
+        </div>
+        <div className="md:w-80">
+          <SubscribeForm />
+        </div>
+      </div>
     </article>
   );
 }

@@ -421,8 +421,6 @@ def build_restaurant_brief_documents(conn, place_ids: Optional[list[str]] = None
     written = 0
     for place in _places(conn, place_ids):
         context = _restaurant_brief_context(conn, place["id"])
-        if not context["official_documents"] and not context["menu_documents"] and not context["food_facts"]:
-            continue
         brief = _generate_restaurant_brief(place, context)
         if not brief:
             continue
@@ -442,7 +440,6 @@ def build_restaurant_brief_documents(conn, place_ids: Optional[list[str]] = None
                 "source_documents": {
                     "official": len(context["official_documents"]),
                     "menu": len(context["menu_documents"]),
-                    "food_facts": len(context["food_facts"]),
                 },
             },
         ):
@@ -883,20 +880,9 @@ def _restaurant_brief_context(conn, place_id: str) -> dict[str, Any]:
         """,
         (place_id,),
     ).fetchall()
-    food_facts = conn.execute(
-        """
-        SELECT fact_type, fact_value, evidence_text, source, source_url, occurred_at::text AS occurred_at, confidence::float AS confidence
-        FROM place_food_facts
-        WHERE place_id = %s
-        ORDER BY confidence DESC, occurred_at DESC NULLS LAST
-        LIMIT 35
-        """,
-        (place_id,),
-    ).fetchall()
     return {
         "official_documents": [_brief_doc(row) for row in official_documents],
         "menu_documents": [_brief_doc(row) for row in menu_documents],
-        "food_facts": [dict(row) for row in food_facts],
     }
 
 
@@ -968,15 +954,15 @@ def _generate_restaurant_brief(place: dict[str, Any], context: dict[str, Any]) -
 
 
 def _repair_restaurant_brief(place: dict[str, Any], data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    facts = context.get("food_facts") or []
-    dish_values = _dedupe_display_values([fact.get("fact_value") for fact in facts if fact.get("fact_type") == "dish"])
     source_chips: list[str] = []
     if any(doc.get("source") == "website" for doc in context.get("official_documents") or []):
         source_chips.append("Official website")
-    if any(doc.get("source") == "google_places" for doc in context.get("official_documents") or []) and "Google profile" not in source_chips:
+    if any(doc.get("source") == "google_places" for doc in context.get("official_documents") or []):
         source_chips.append("Google profile")
-    if context.get("menu_documents") and "Menu facts" not in source_chips:
-        source_chips.append("Menu facts")
+    if context.get("menu_documents"):
+        source_chips.append("Menu")
+    if not source_chips:
+        source_chips.append("Web search")
     what_it_is = _clean_text(data.get("what_it_is") or "")
     if not what_it_is:
         what_it_is = f"{place['name']} is a local restaurant in {place.get('neighborhood') or place.get('city') or 'the area'}."
@@ -989,12 +975,12 @@ def _repair_restaurant_brief(place: dict[str, Any], data: dict[str, Any], contex
     return {
         "what_it_is": what_it_is,
         "official_context_note": _clean_text(data.get("official_context_note") or "Official context, not signal evidence."),
-        "signature_menu_items": _dedupe_display_values(data.get("signature_menu_items") or dish_values)[:8],
+        "signature_menu_items": _dedupe_display_values(data.get("signature_menu_items") or [])[:8],
         "highlight_items": highlight_items,
         "location_format": _clean_text(data.get("location_format") or _brief_location_format(place)),
         "vibe_tags": [_clean_text(t) for t in (data.get("vibe_tags") or []) if _clean_text(t)][:5],
         "occasions": [_clean_text(o) for o in (data.get("occasions") or []) if _clean_text(o)][:4],
-        "source_chips": source_chips[:5] or ["Official context"],
+        "source_chips": source_chips[:5],
         "trust_note": _clean_text(data.get("trust_note") or "Restaurant brief is context only; recent movement is handled in the signal sections below."),
     }
 
