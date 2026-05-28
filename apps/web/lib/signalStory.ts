@@ -94,7 +94,7 @@ export function mentionCountFor(signal: Signal) {
   return signal.evidence.current_mention_count || signal.evidence.mention_count || 0;
 }
 
-function textEvidence(signal: Signal, key: string) {
+export function textEvidence(signal: Signal, key: string) {
   const value = signal.evidence[key];
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }

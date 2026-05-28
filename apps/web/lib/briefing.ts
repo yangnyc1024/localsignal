@@ -1,5 +1,5 @@
 import type { Report, Signal } from "@/lib/types";
-import { cuisineType, evidenceNotes, mentionCountFor, sourceCountFor } from "@/lib/signalStory";
+import { cuisineType, evidenceNotes, mentionCountFor, placeArea, sourceCountFor, textEvidence } from "@/lib/signalStory";
 
 export type FoodCategoryKey =
   | "cafe"
@@ -439,14 +439,6 @@ function categoryWhy(label: string, signal: Signal) {
   return `${dish} is worth a look because it is the clearest food-specific signal here.`;
 }
 
-function placeArea(signal: Signal) {
-  const neighborhood = signal.place.neighborhood?.trim();
-  if (neighborhood && neighborhood !== signal.city) {
-    return `${neighborhood}, ${signal.city}`;
-  }
-  return signal.city;
-}
-
 function dinnerCategory() {
   return FOOD_CATEGORIES.find((category) => category.key === "dinner") ?? FOOD_CATEGORIES[FOOD_CATEGORIES.length - 1];
 }
@@ -588,11 +580,6 @@ function sourceLineFor(signal: Signal) {
   const note = notes[0] ? ` ${notes[0]}` : "";
   const weight = mentions && mentions > 1 ? "More than one local note points this way." : "This is a light read, so open the card for context.";
   return `${weight} It sits in ${category.toLowerCase()} and comes from ${sourceText}.${note}`.trim();
-}
-
-function textEvidence(signal: Signal, key: string) {
-  const value = signal.evidence[key];
-  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 function formatDate(value: string) {

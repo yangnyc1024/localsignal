@@ -74,6 +74,8 @@ ALTER TABLE signals ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'publi
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS rank INTEGER;
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS time_window TEXT;
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;
+-- food_signal promoted from evidence JSONB bag to its own queryable column
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS food_signal JSONB;
 
 CREATE TABLE IF NOT EXISTS raw_source_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

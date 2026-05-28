@@ -35,12 +35,12 @@ export function SubscribeForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="rounded-lg border border-line bg-white/88 p-4 shadow-sm">
+    <form onSubmit={onSubmit} className="grid gap-3">
       <label htmlFor="email" className="flex items-center gap-2 text-sm font-semibold text-ink">
         <MailCheck size={16} />
         Weekly email
       </label>
-      <div className="mt-3 flex gap-2">
+      <div className="flex gap-2">
         <input
           id="email"
           type="email"
@@ -61,7 +61,7 @@ export function SubscribeForm() {
         </button>
       </div>
       {message ? (
-        <p className={status === "success" ? "mt-3 text-sm text-moss" : "mt-3 text-sm text-clay"}>
+        <p className={status === "success" ? "text-sm text-moss" : "text-sm text-clay"}>
           {message}
         </p>
       ) : null}

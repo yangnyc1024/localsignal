@@ -134,19 +134,8 @@ export type SignalDetail = Signal & {
   baseline_context: BaselineContext;
   metrics: SignalMetric[];
   restaurant_brief?: RestaurantBrief | null;
-  food_facts?: FoodFact[];
   evidence_items: SignalEvidenceItem[];
   related_signals: RelatedSignal[];
-};
-
-export type FoodFact = {
-  fact_type: "dish" | "occasion" | "behavior";
-  fact_value: string;
-  evidence_text: string;
-  source: string;
-  source_url?: string | null;
-  confidence: number;
-  occurred_at?: string | null;
 };
 
 export type HighlightItem = {

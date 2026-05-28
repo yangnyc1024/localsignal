@@ -1,5 +1,4 @@
 import json
-import hashlib
 import os
 import re
 import urllib.parse
@@ -14,94 +13,7 @@ from psycopg.types.json import Jsonb
 
 DOCUMENT_MIN_CHARS = 80
 EMBEDDING_MODEL = "text-embedding-3-small"
-FOOD_INTELLIGENCE_SOURCE = "localsignal_food_intelligence"
 RESTAURANT_BRIEF_SOURCE = "localsignal_restaurant_brief"
-
-DISH_TERMS = [
-    "bbq",
-    "barbecue",
-    "samgyeopsal",
-    "samhap",
-    "jumulleok",
-    "gopchang",
-    "jjigae",
-    "tofu",
-    "soondubu",
-    "kimchi",
-    "banchan",
-    "pizza",
-    "sourdough",
-    "pinsa",
-    "seafood",
-    "crab",
-    "shrimp",
-    "crawfish",
-    "boil",
-    "doner",
-    "kebab",
-    "gyro",
-    "ramen",
-    "sushi",
-    "bakery",
-    "bread",
-    "pastry",
-    "croissant",
-    "coffee",
-    "espresso",
-    "matcha",
-    "dessert",
-    "cake",
-    "wings",
-    "burger",
-    "taco",
-    "empanada",
-]
-
-OCCASION_TERMS = [
-    "group",
-    "friends",
-    "family",
-    "date",
-    "dinner",
-    "lunch",
-    "brunch",
-    "late night",
-    "byob",
-    "drink",
-    "drinks",
-    "party",
-    "hang out",
-    "takeout",
-    "delivery",
-    "quick",
-]
-
-BEHAVIOR_TERMS = [
-    "wait",
-    "line",
-    "crowd",
-    "busy",
-    "rush",
-    "rushed",
-    "slow",
-    "fast",
-    "service",
-    "server",
-    "staff",
-    "comfortable",
-    "linger",
-    "stay",
-    "portion",
-    "price",
-    "fresh",
-    "spicy",
-    "crispy",
-    "grill",
-    "grilled",
-    "table",
-    "share",
-    "shared",
-]
 
 
 def ensure_place_knowledge_schema(conn) -> None:
@@ -141,38 +53,8 @@ def ensure_place_knowledge_schema(conn) -> None:
         )
         """
     )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS place_food_facts (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          place_id UUID NOT NULL REFERENCES places(id) ON DELETE CASCADE,
-          source_document_id UUID REFERENCES place_documents(id) ON DELETE SET NULL,
-          fact_type TEXT NOT NULL CHECK (fact_type IN ('dish', 'occasion', 'behavior')),
-          fact_value TEXT NOT NULL,
-          normalized_value TEXT NOT NULL,
-          evidence_text TEXT NOT NULL,
-          source TEXT NOT NULL,
-          source_url TEXT,
-          occurred_at TIMESTAMPTZ,
-          confidence NUMERIC(5, 4) NOT NULL DEFAULT 0.5,
-          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-          evidence_hash TEXT NOT NULL,
-          embedding vector(1536),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-        """
-    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_place_documents_place_type ON place_documents(place_id, content_type)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_place_documents_place_fetched ON place_documents(place_id, fetched_at DESC)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_place_food_facts_place_type ON place_food_facts(place_id, fact_type, confidence DESC)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_place_food_facts_value ON place_food_facts(normalized_value)")
-    conn.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_place_food_facts_unique_evidence
-        ON place_food_facts(place_id, fact_type, normalized_value, evidence_hash)
-        """
-    )
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_place_documents_embedding_hnsw
@@ -359,60 +241,6 @@ def ingest_website_documents(conn, place_ids: Optional[list[str]] = None) -> int
     return written
 
 
-def build_food_intelligence_documents(conn, place_ids: Optional[list[str]] = None, limit_per_place: int = 80) -> dict[str, int]:
-    ensure_place_knowledge_schema(conn)
-    facts_written = 0
-    packets_written = 0
-    for place in _places(conn, place_ids):
-        conn.execute("DELETE FROM place_food_facts WHERE place_id = %s", (place["id"],))
-        rows = conn.execute(
-            """
-            SELECT
-              id::text AS id,
-              source,
-              source_url,
-              title,
-              content,
-              content_type,
-              occurred_at::text AS occurred_at,
-              metadata
-            FROM place_documents
-            WHERE place_id = %s
-              AND content_type IN ('signal_evidence', 'review', 'menu', 'website', 'place_profile', 'official_description')
-            ORDER BY
-              CASE content_type
-                WHEN 'menu' THEN 0
-                WHEN 'official_description' THEN 1
-                WHEN 'website' THEN 2
-                WHEN 'review' THEN 3
-                WHEN 'signal_evidence' THEN 4
-                ELSE 4
-              END,
-              COALESCE(occurred_at, fetched_at) DESC
-            LIMIT %s
-            """,
-            (place["id"], limit_per_place),
-        ).fetchall()
-        facts = _extract_food_facts(place, rows)
-        for fact in facts:
-            if upsert_place_food_fact(conn, place["id"], fact):
-                facts_written += 1
-        packet = _food_intelligence_packet_for_place(conn, place)
-        if not packet:
-            continue
-        if upsert_place_document(
-            conn,
-            place_id=place["id"],
-            source=FOOD_INTELLIGENCE_SOURCE,
-            source_url=f"localsignal://food-intelligence/{place['id']}",
-            title=f"Food intelligence for {place['name']}",
-            content=packet["content"],
-            content_type="food_intelligence",
-            metadata=packet["metadata"],
-        ):
-            packets_written += 1
-    return {"facts": facts_written, "packets": packets_written}
-
 
 def build_restaurant_brief_documents(conn, place_ids: Optional[list[str]] = None) -> int:
     ensure_place_knowledge_schema(conn)
@@ -421,8 +249,6 @@ def build_restaurant_brief_documents(conn, place_ids: Optional[list[str]] = None
     written = 0
     for place in _places(conn, place_ids):
         context = _restaurant_brief_context(conn, place["id"])
-        if not context["official_documents"] and not context["menu_documents"] and not context["food_facts"]:
-            continue
         brief = _generate_restaurant_brief(place, context)
         if not brief:
             continue
@@ -442,7 +268,6 @@ def build_restaurant_brief_documents(conn, place_ids: Optional[list[str]] = None
                 "source_documents": {
                     "official": len(context["official_documents"]),
                     "menu": len(context["menu_documents"]),
-                    "food_facts": len(context["food_facts"]),
                 },
             },
         ):
@@ -665,61 +490,6 @@ def upsert_place_document(
     return bool(row)
 
 
-def upsert_place_food_fact(conn, place_id: str, fact: dict[str, Any]) -> bool:
-    evidence_text = _clean_text(fact.get("evidence_text") or "")
-    fact_value = _clean_text(fact.get("fact_value") or "")
-    fact_type = _clean_text(fact.get("fact_type") or "")
-    if fact_type not in {"dish", "occasion", "behavior"} or not fact_value or len(evidence_text) < 20:
-        return False
-    normalized_value = _normalize_fact_value(fact_value)
-    evidence_hash = _evidence_hash(evidence_text)
-    row = conn.execute(
-        """
-        INSERT INTO place_food_facts (
-          place_id,
-          source_document_id,
-          fact_type,
-          fact_value,
-          normalized_value,
-          evidence_text,
-          source,
-          source_url,
-          occurred_at,
-          confidence,
-          metadata,
-          evidence_hash
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
-        ON CONFLICT (place_id, fact_type, normalized_value, evidence_hash)
-        DO UPDATE SET
-          fact_value = EXCLUDED.fact_value,
-          evidence_text = EXCLUDED.evidence_text,
-          source = EXCLUDED.source,
-          source_url = EXCLUDED.source_url,
-          occurred_at = EXCLUDED.occurred_at,
-          confidence = GREATEST(place_food_facts.confidence, EXCLUDED.confidence),
-          metadata = EXCLUDED.metadata,
-          updated_at = now(),
-          embedding = NULL
-        RETURNING id
-        """,
-        (
-            place_id,
-            fact.get("source_document_id"),
-            fact_type,
-            fact_value,
-            normalized_value,
-            evidence_text,
-            _clean_text(fact.get("source") or "unknown"),
-            fact.get("source_url"),
-            fact.get("occurred_at"),
-            float(fact.get("confidence") or 0.5),
-            Jsonb(fact.get("metadata") or {}),
-            evidence_hash,
-        ),
-    ).fetchone()
-    return bool(row)
-
 
 def _places(conn, place_ids: Optional[list[str]]) -> list[dict[str, Any]]:
     if place_ids:
@@ -742,122 +512,6 @@ def _places(conn, place_ids: Optional[list[str]]) -> list[dict[str, Any]]:
     ).fetchall()
 
 
-def _extract_food_facts(place: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    facts: list[dict[str, Any]] = []
-    for row in rows:
-        content = _clean_text(row.get("content") or "")
-        if not content:
-            continue
-        sentences = _sentences(content)
-        for sentence in sentences:
-            cleaned = _clean_text(sentence)
-            if len(cleaned) < 25:
-                continue
-            facts.extend(_facts_from_sentence(place, row, cleaned, "dish", DISH_TERMS))
-            facts.extend(_facts_from_sentence(place, row, cleaned, "occasion", OCCASION_TERMS))
-            facts.extend(_facts_from_sentence(place, row, cleaned, "behavior", BEHAVIOR_TERMS))
-    return _dedupe_facts(facts)
-
-
-def _facts_from_sentence(
-    place: dict[str, Any],
-    row: dict[str, Any],
-    sentence: str,
-    fact_type: str,
-    terms: list[str],
-) -> list[dict[str, Any]]:
-    lower = sentence.lower()
-    facts: list[dict[str, Any]] = []
-    if _skip_fact_sentence(lower):
-        return facts
-    for term in terms:
-        pattern = r"(?<![a-z0-9])" + re.escape(term.lower()) + r"(?![a-z0-9])"
-        if not re.search(pattern, lower):
-            continue
-        if fact_type == "dish" and _term_only_matches_place_name(term, sentence, place):
-            continue
-        facts.append(
-            {
-                "source_document_id": row.get("id"),
-                "fact_type": fact_type,
-                "fact_value": _display_fact_value(term),
-                "evidence_text": sentence[:700],
-                "source": row.get("source") or row.get("content_type") or "place_document",
-                "source_url": row.get("source_url"),
-                "occurred_at": row.get("occurred_at"),
-                "confidence": _fact_confidence(fact_type, row.get("content_type") or "", sentence, place),
-                "metadata": {
-                    "content_type": row.get("content_type") or "",
-                    "title": row.get("title") or "",
-                    "place_name": place.get("name") or "",
-                },
-            }
-        )
-    return facts
-
-
-def _food_intelligence_packet_for_place(conn, place: dict[str, Any]) -> Optional[dict[str, Any]]:
-    rows = conn.execute(
-        """
-        SELECT
-          fact_type,
-          fact_value,
-          normalized_value,
-          evidence_text,
-          source,
-          source_url,
-          occurred_at::text AS occurred_at,
-          confidence::float AS confidence,
-          metadata
-        FROM place_food_facts
-        WHERE place_id = %s
-        ORDER BY confidence DESC, occurred_at DESC NULLS LAST, updated_at DESC
-        LIMIT 40
-        """,
-        (place["id"],),
-    ).fetchall()
-    if not rows:
-        return None
-    grouped = {
-        "dish": [dict(row) for row in rows if row["fact_type"] == "dish"],
-        "occasion": [dict(row) for row in rows if row["fact_type"] == "occasion"],
-        "behavior": [dict(row) for row in rows if row["fact_type"] == "behavior"],
-    }
-    content = _food_intelligence_content(place, grouped)
-    metadata = {
-        "fact_count": len(rows),
-        "dish_terms": _fact_values(grouped["dish"]),
-        "occasion_terms": _fact_values(grouped["occasion"]),
-        "behavior_terms": _fact_values(grouped["behavior"]),
-        "source_count": len({row["source"] for row in rows if row.get("source")}),
-        "source_types": sorted({(row.get("metadata") or {}).get("content_type") for row in rows if (row.get("metadata") or {}).get("content_type")}),
-        "facts": [_fact_metadata(row) for row in rows[:20]],
-    }
-    return {"content": content, "metadata": metadata}
-
-
-def _food_intelligence_content(place: dict[str, Any], grouped: dict[str, list[dict[str, Any]]]) -> str:
-    dishes = grouped.get("dish", [])
-    occasions = grouped.get("occasion", [])
-    behaviors = grouped.get("behavior", [])
-    lines = [
-        f"Food intelligence evidence packet for {place['name']}",
-        f"Area: {place.get('neighborhood') or place.get('city') or 'local area'}",
-        "Purpose: expose source-backed dish, occasion, and behavior facts for RAG. This packet is not a verdict or recommendation.",
-        "",
-        "Extracted dish facts:",
-        *_fact_lines(dishes),
-        "",
-        "Extracted occasion facts:",
-        *_fact_lines(occasions),
-        "",
-        "Extracted behavior facts:",
-        *_fact_lines(behaviors),
-        "",
-        "Interpretation boundary:",
-        "Use these facts as context only. A Food-Level Read needs overlap between current signal evidence and these dish, occasion, or behavior facts.",
-    ]
-    return "\n".join(lines)
 
 
 def _restaurant_brief_context(conn, place_id: str) -> dict[str, Any]:
@@ -883,20 +537,9 @@ def _restaurant_brief_context(conn, place_id: str) -> dict[str, Any]:
         """,
         (place_id,),
     ).fetchall()
-    food_facts = conn.execute(
-        """
-        SELECT fact_type, fact_value, evidence_text, source, source_url, occurred_at::text AS occurred_at, confidence::float AS confidence
-        FROM place_food_facts
-        WHERE place_id = %s
-        ORDER BY confidence DESC, occurred_at DESC NULLS LAST
-        LIMIT 35
-        """,
-        (place_id,),
-    ).fetchall()
     return {
         "official_documents": [_brief_doc(row) for row in official_documents],
         "menu_documents": [_brief_doc(row) for row in menu_documents],
-        "food_facts": [dict(row) for row in food_facts],
     }
 
 
@@ -968,15 +611,15 @@ def _generate_restaurant_brief(place: dict[str, Any], context: dict[str, Any]) -
 
 
 def _repair_restaurant_brief(place: dict[str, Any], data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    facts = context.get("food_facts") or []
-    dish_values = _dedupe_display_values([fact.get("fact_value") for fact in facts if fact.get("fact_type") == "dish"])
     source_chips: list[str] = []
     if any(doc.get("source") == "website" for doc in context.get("official_documents") or []):
         source_chips.append("Official website")
-    if any(doc.get("source") == "google_places" for doc in context.get("official_documents") or []) and "Google profile" not in source_chips:
+    if any(doc.get("source") == "google_places" for doc in context.get("official_documents") or []):
         source_chips.append("Google profile")
-    if context.get("menu_documents") and "Menu facts" not in source_chips:
-        source_chips.append("Menu facts")
+    if context.get("menu_documents"):
+        source_chips.append("Menu")
+    if not source_chips:
+        source_chips.append("Web search")
     what_it_is = _clean_text(data.get("what_it_is") or "")
     if not what_it_is:
         what_it_is = f"{place['name']} is a local restaurant in {place.get('neighborhood') or place.get('city') or 'the area'}."
@@ -989,12 +632,12 @@ def _repair_restaurant_brief(place: dict[str, Any], data: dict[str, Any], contex
     return {
         "what_it_is": what_it_is,
         "official_context_note": _clean_text(data.get("official_context_note") or "Official context, not signal evidence."),
-        "signature_menu_items": _dedupe_display_values(data.get("signature_menu_items") or dish_values)[:8],
+        "signature_menu_items": _dedupe_display_values(data.get("signature_menu_items") or [])[:8],
         "highlight_items": highlight_items,
         "location_format": _clean_text(data.get("location_format") or _brief_location_format(place)),
         "vibe_tags": [_clean_text(t) for t in (data.get("vibe_tags") or []) if _clean_text(t)][:5],
         "occasions": [_clean_text(o) for o in (data.get("occasions") or []) if _clean_text(o)][:4],
-        "source_chips": source_chips[:5] or ["Official context"],
+        "source_chips": source_chips[:5],
         "trust_note": _clean_text(data.get("trust_note") or "Restaurant brief is context only; recent movement is handled in the signal sections below."),
     }
 
@@ -1056,153 +699,6 @@ def _dedupe_display_values(values: Any) -> list[str]:
         cleaned.append(text)
     return cleaned
 
-
-def _matched_terms(text: str, terms: list[str]) -> list[str]:
-    matches: list[str] = []
-    for term in terms:
-        pattern = r"(?<![a-z0-9])" + re.escape(term.lower()) + r"(?![a-z0-9])"
-        if re.search(pattern, text):
-            matches.append(term)
-    return matches[:12]
-
-
-def _sentences(content: str) -> list[str]:
-    return [sentence for sentence in re.split(r"(?<=[.!?。！？])\s+", content) if sentence]
-
-
-def _fact_confidence(fact_type: str, content_type: str, sentence: str, place: dict[str, Any]) -> float:
-    confidence = 0.52
-    if content_type == "menu":
-        confidence += 0.24 if fact_type == "dish" else 0.08
-    elif content_type == "website":
-        confidence += 0.18 if fact_type == "dish" else 0.1
-    elif content_type in {"review", "signal_evidence"}:
-        confidence += 0.16
-    elif content_type == "place_profile":
-        confidence += 0.1
-    if place.get("name") and str(place["name"]).lower() in sentence.lower():
-        confidence += 0.03
-    if len(sentence) > 220:
-        confidence -= 0.04
-    return round(max(0.35, min(confidence, 0.95)), 4)
-
-
-def _skip_fact_sentence(lower_sentence: str) -> bool:
-    noisy_terms = [
-        "skip to content",
-        "copyright",
-        "all rights reserved",
-        "@",
-        "information ",
-        "make your reservation",
-        "visit doner point",
-        "terms",
-        "privacy",
-    ]
-    return any(term in lower_sentence for term in noisy_terms)
-
-
-def _term_only_matches_place_name(term: str, sentence: str, place: dict[str, Any]) -> bool:
-    place_name = _clean_text(place.get("name") or "").lower()
-    if not place_name or term.lower() not in place_name:
-        return False
-    lower = sentence.lower()
-    food_context = [
-        "plate",
-        "wrap",
-        "rice",
-        "served",
-        "filled",
-        "comes with",
-        "meat",
-        "taste",
-        "food",
-        "menu",
-        "cooked",
-        "fresh",
-        "delicious",
-        "meal",
-        "$",
-    ]
-    return not any(marker in lower for marker in food_context)
-
-
-def _dedupe_facts(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    deduped: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
-    for fact in facts:
-        key = (
-            str(fact.get("fact_type") or ""),
-            _normalize_fact_value(str(fact.get("fact_value") or "")),
-            _evidence_hash(str(fact.get("evidence_text") or "")),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(fact)
-    return deduped[:120]
-
-
-def _fact_values(rows: list[dict[str, Any]]) -> list[str]:
-    values: list[str] = []
-    seen: set[str] = set()
-    for row in rows:
-        value = _clean_text(row.get("fact_value") or "")
-        normalized = _normalize_fact_value(value)
-        if not value or normalized in seen:
-            continue
-        seen.add(normalized)
-        values.append(value)
-    return values[:12]
-
-
-def _fact_lines(rows: list[dict[str, Any]]) -> list[str]:
-    if not rows:
-        return ["- Not enough source-backed facts found."]
-    lines: list[str] = []
-    seen: set[str] = set()
-    for row in rows[:10]:
-        value = _clean_text(row.get("fact_value") or "")
-        evidence = _clean_text(row.get("evidence_text") or "")
-        if not value or not evidence:
-            continue
-        key = f"{row.get('fact_type')}:{_normalize_fact_value(value)}:{_evidence_hash(evidence)}"
-        if key in seen:
-            continue
-        seen.add(key)
-        source = _clean_text(row.get("source") or "source")
-        date = row.get("occurred_at") or "unknown date"
-        confidence = float(row.get("confidence") or 0)
-        lines.append(f"- {value} | evidence: \"{evidence[:260]}\" | source: {source} | date: {date} | confidence: {confidence:.2f}")
-    return lines or ["- Not enough source-backed facts found."]
-
-
-def _fact_metadata(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "type": row.get("fact_type"),
-        "value": row.get("fact_value"),
-        "evidence_text": row.get("evidence_text"),
-        "source": row.get("source"),
-        "source_url": row.get("source_url"),
-        "occurred_at": row.get("occurred_at"),
-        "confidence": row.get("confidence"),
-    }
-
-
-def _display_fact_value(value: str) -> str:
-    cleaned = _clean_text(value)
-    upper_values = {"bbq": "BBQ", "byob": "BYOB"}
-    if cleaned.lower() in upper_values:
-        return upper_values[cleaned.lower()]
-    return cleaned
-
-
-def _normalize_fact_value(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", _clean_text(value).lower()).strip()
-
-
-def _evidence_hash(value: str) -> str:
-    return hashlib.sha256(_clean_text(value).lower().encode("utf-8")).hexdigest()[:24]
 
 
 def _dedupe_document_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

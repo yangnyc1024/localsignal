@@ -6,7 +6,7 @@ PIP_CACHE_DIR := .pip-cache
 export PYTHONPYCACHEPREFIX
 export PIP_CACHE_DIR
 
-.PHONY: dev up up-detached down ps logs setup-python api engine demo-report evidence-ingestion baseline-profiles discover-places place-knowledge report send-digest send-test-email scheduler web validate-social apify-instagram-search docker-discover docker-evidence docker-place-knowledge docker-report docker-send-digest docker-shell
+.PHONY: dev up up-detached down ps logs setup-python api engine evidence-ingestion baseline-profiles discover-places place-knowledge report send-digest send-test-email scheduler web validate-social apify-instagram-search docker-discover docker-evidence docker-place-knowledge docker-report docker-send-digest docker-shell
 
 dev: up
 
@@ -34,10 +34,7 @@ api:
 	cd services/api && ../../.venv/bin/uvicorn app.main:app --reload --port 8000
 
 engine:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_demo
-
-demo-report:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_demo_report
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_weekly
 
 evidence-ingestion:
 	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_evidence_ingestion
@@ -49,7 +46,7 @@ discover-places:
 	cd services/engine && ../../$(PYTHON) -m localsignal_engine.discover_places
 
 place-knowledge:
-	PYTHONPATH=services/engine $(PYTHON) -m localsignal_engine.run_place_knowledge --sync-evidence --google --website --food-intelligence --restaurant-brief --embed
+	PYTHONPATH=services/engine $(PYTHON) -m localsignal_engine.run_place_knowledge --sync-evidence --google --website --restaurant-brief --embed
 
 report:
 	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_weekly
@@ -80,7 +77,7 @@ docker-evidence:
 	docker compose run --rm -e REDDIT_SUBREDDITS= engine python -m localsignal_engine.run_evidence_ingestion
 
 docker-place-knowledge:
-	docker compose run --rm engine python -m localsignal_engine.run_place_knowledge --sync-evidence --google --website --food-intelligence --restaurant-brief --embed
+	docker compose run --rm engine python -m localsignal_engine.run_place_knowledge --sync-evidence --google --website --restaurant-brief --embed
 
 docker-report:
 	docker compose run --rm -e SEND_DIGEST_ENABLED=false -e REDDIT_SUBREDDITS= engine python -m localsignal_engine.run_weekly
