@@ -210,16 +210,6 @@ cd services/api
 ../../.venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
-Signal engine demo:
-
-```bash
-make setup-python
-cd services/engine
-../../.venv/bin/python -m localsignal_engine.run_demo
-```
-
-Demo data is isolated to explicit demo commands. The production scheduler does not use sample mentions.
-
 Generate the real weekly report into Postgres:
 
 ```bash
@@ -337,4 +327,4 @@ Mentions
 -> user feedback
 ```
 
-The current implementation keeps deterministic sample data only for explicit demo commands. The weekly scheduler uses live/imported mentions and fails clearly if no real signals can be generated.
+The weekly scheduler uses live/imported mentions and fails clearly if no real signals can be generated.

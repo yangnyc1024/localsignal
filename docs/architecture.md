@@ -37,7 +37,7 @@ flowchart TD
 3. `run_place_knowledge` converts existing evidence, Google/place details, and website text into `place_documents`.
 4. `build_restaurant_brief_documents` uses GPT-4o with `web_search_preview` to generate a structured restaurant brief per place, stored in `place_documents` with `content_type='restaurant_brief'`. The structured JSON is stored in `place_documents.metadata`; a text version is stored in `place_documents.content` for RAG retrieval.
 5. `place_documents.embedding` stores OpenAI `text-embedding-3-small` vectors in pgvector.
-6. LLM enrichment retrieves the most relevant `place_documents` for a place/signal and writes signal-local food interpretation into `signals.evidence.food_signal`.
+6. LLM enrichment retrieves the most relevant `place_documents` for a place/signal and writes signal-local food interpretation into the dedicated `signals.food_signal` JSONB column. The API merges it back into `evidence.food_signal` in responses for backward compatibility.
 7. Report generation writes `reports`, `report_signals`, and `reports.briefing`.
 8. FastAPI returns product-shaped DTOs. The web app should not need to know database internals.
 
@@ -68,7 +68,7 @@ Describes **what happened this week** at a place — time-windowed, generated we
 | `evidence_chunks` | Source-backed review/mention snippets, vectorized |
 | `signal_evidence` | Ranked links from signals to evidence chunks |
 
-`signals.evidence.food_signal` is the primary source for the "What's moving this week" section.
+`signals.food_signal` (dedicated JSONB column) is the primary source for the "What's moving this week" section.
 
 `evidence_chunks` is shared: Place Knowledge queries the full history; Signal queries the current week window only.
 
@@ -88,7 +88,7 @@ Durable profile summary for a place. API responses should prefer this table over
 
 `signals`
 
-The signal record: title, score, confidence, metrics, status, and signal-local evidence JSON. `signals.evidence.food_signal` is signal-local because it changes with the particular trend being explained.
+The signal record: title, score, confidence, metrics, status, evidence JSON, and `food_signal` (dedicated JSONB column). `food_signal` is signal-local because it changes with the particular trend being explained. The `evidence` bag retains the signal metrics and LLM narrative fields; `food_signal` lives in its own column so it is queryable and indexable independently.
 
 `signal_evidence`
 
@@ -130,7 +130,7 @@ The brief is stored in `place_documents.metadata` (structured JSON for API) and 
 
 Generated per signal by `localsignal_engine.llm_signal` from `evidence_chunks` in the current week window.
 
-**Output shape (inside `signals.evidence.food_signal`):**
+**Output shape (stored in `signals.food_signal` column; API response also includes it as `evidence.food_signal` for backward compatibility):**
 
 ```python
 {
@@ -164,7 +164,7 @@ Source: `restaurant_brief` (from `place_documents.metadata`)
 Falls back to `signals.evidence.place_profile` data when `restaurant_brief` is null.
 
 ### Section 2 — What's moving this week
-Source: `food_signal` (from `signals.evidence.food_signal`) + `evidence_chunks`
+Source: `food_signal` (from `signals.food_signal` column, surfaced via `evidence.food_signal` in API responses) + `evidence_chunks`
 
 - Featured dish card: `signal_dish` or `primary_pull`
 - Occasion context if available
@@ -227,18 +227,42 @@ The scheduler container must carry the same LLM-related environment as ad-hoc en
 
 ## Current Debt
 
-- `signals.evidence` still carries several product fields. Keep `food_signal` there for now, but avoid adding more durable place facts to it.
+- `signals.evidence` bag still carries several LLM narrative fields (`reader_hook`, `skeptic_note`, `good_for`, `watch_out`, `best_read_as`, etc.). These are currently only read by the API presenter layer. Avoid adding more durable place facts to it.
 - `place_knowledge.py` owns prompts, validation, repair, brief generation, and food signal logic. Split it once the product contract stabilizes.
 - `place_documents` has the vector index; `evidence_chunks.embedding` and `mentions.embedding` are available but not yet part of the active retrieval path.
 - API still performs some fallback shaping for older rows. New code should move durable intelligence into tables first, then have API expose it cleanly.
 - `place_food_facts` table and the `DISH_TERMS` regex extraction pipeline are deprecated. Dish discovery is now handled by `restaurant_brief.signature_menu_items` (LLM + web search) and `food_signal.signal_dish` (weekly evidence extraction).
 - `place_documents` conflates input documents (crawled content) and output documents (LLM-generated briefs). Consider a dedicated `place_briefs` table when the schema stabilizes.
 
+## API Structure
+
+The FastAPI service (`services/api/app/`) is organized as follows:
+
+```
+app/
+├── main.py                  # App init, middleware, router registration
+├── routers/
+│   ├── signals.py           # GET /signals, GET /signals/{slug}
+│   ├── reports.py           # GET /reports/latest
+│   ├── admin.py             # /api/* pipeline triggers + admin reads
+│   └── engagement.py        # POST /feedback, POST /subscribers
+├── presenters/
+│   └── signals.py           # All helper functions: _signal_row, _metrics,
+│                            #   _retrieve_candidate_evidence, _write_generated_signal, etc.
+├── models.py                # Pydantic DTOs
+├── pipeline.py              # Scoring and prompt utilities
+├── openai_pipeline.py       # OpenAI embed + generate
+├── db.py                    # Connection pool
+└── config.py                # Settings
+```
+
+Router modules stay thin (HTTP concerns only). All shaping logic lives in `presenters/signals.py`.
+
 ## Near-Term Architecture Direction
 
 1. Keep `place_profiles` as the canonical place profile source for durable computed fields.
 2. Keep restaurant briefs in `place_documents` (metadata + content) until volume warrants a dedicated table.
-3. Keep signal-specific LLM reads inside `signals.evidence.food_signal` until a `signal_insights` table is worth the extra schema.
+3. `signals.food_signal` is now a dedicated column — extend signal-specific fields there, not into the evidence bag.
 4. Keep `place_documents` as the active RAG corpus.
 5. Prefer explicit SQL/Python orchestration over a framework until retrieval becomes multi-hop or multi-agent.
 6. Treat the web app as a rendering layer. Product intelligence should arrive through API DTOs, not be invented in React.

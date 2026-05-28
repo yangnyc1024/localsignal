@@ -34,7 +34,7 @@ api:
 	cd services/api && ../../.venv/bin/uvicorn app.main:app --reload --port 8000
 
 engine:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_demo
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_weekly
 
 evidence-ingestion:
 	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_evidence_ingestion
