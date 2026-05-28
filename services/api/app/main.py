@@ -13,7 +13,6 @@ from app.models import (
     FeedbackCreate,
     FeedbackDTO,
     EmailDeliveryDTO,
-    FoodFactDTO,
     ReportDTO,
     IngestionRunDTO,
     AlwaysHotDTO,
@@ -305,23 +304,6 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
     evidence = signal.get("evidence") or {}
     current_days = int(evidence.get("current_window_days") or 14)
     restaurant_brief = _restaurant_brief(conn, signal["place"]["id"])
-    food_fact_rows = conn.execute(
-        """
-        SELECT
-          fact_type,
-          fact_value,
-          evidence_text,
-          source,
-          source_url,
-          confidence::float AS confidence,
-          occurred_at::text AS occurred_at
-        FROM place_food_facts
-        WHERE place_id = %s
-        ORDER BY fact_type, confidence DESC
-        LIMIT 20
-        """,
-        (signal["place"]["id"],),
-    ).fetchall()
     evidence_chunks = conn.execute(
         """
         SELECT
@@ -444,7 +426,6 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
         "baseline_context": _baseline_context(signal),
         "metrics": signal.get("metrics") or _metrics(signal),
         "restaurant_brief": restaurant_brief,
-        "food_facts": [dict(row) for row in food_fact_rows],
         "evidence_items": [_evidence_item(row, signal) for row in evidence_chunks],
         "related_signals": related,
     }

@@ -55,6 +55,7 @@ export type PlaceProfile = {
 export type FoodSignal = {
   summary?: string;
   primary_pull?: string;
+  signal_dish?: string;
   flavor_cue?: string;
   occasion?: string;
   confidence?: "High" | "Medium" | "Low" | string;
@@ -153,6 +154,8 @@ export type RestaurantBrief = {
   official_context_note: string;
   signature_menu_items: string[];
   location_format: string;
+  vibe_tags?: string[];
+  occasions?: string[];
   source_chips: string[];
   trust_note: string;
 };

@@ -911,6 +911,8 @@ def _generate_restaurant_brief(place: dict[str, Any], context: dict[str, Any]) -
             "This is food context, not proof of recent momentum. Do not mention popularity unless it is clearly phrased as official/self-description context.",
             "Do not write a long essay. Produce compact structured fields similar to a restaurant background card.",
             "Avoid recommendation language such as must try, best, top rated, or you should.",
+            "For vibe_tags: extract 3-5 short descriptors from official context about the dining format, atmosphere, or seating style (e.g. 'Sit-down', 'BYOB', 'Counter seating', 'Group-friendly', 'Retro interior'). Only use what is supported by documents.",
+            "For occasions: list 2-4 typical visit occasions mentioned or implied in official documents (e.g. 'Date night', 'Family dinner', 'Weekend lunch', 'Late-night stop'). Do not invent occasions.",
             "Output valid JSON only.",
         ],
         "place": place,
@@ -918,12 +920,14 @@ def _generate_restaurant_brief(place: dict[str, Any], context: dict[str, Any]) -
         "json_schema": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["what_it_is", "official_context_note", "signature_menu_items", "location_format", "source_chips", "trust_note"],
+            "required": ["what_it_is", "official_context_note", "signature_menu_items", "location_format", "vibe_tags", "occasions", "source_chips", "trust_note"],
             "properties": {
                 "what_it_is": {"type": "string"},
                 "official_context_note": {"type": "string"},
                 "signature_menu_items": {"type": "array", "items": {"type": "string"}},
                 "location_format": {"type": "string"},
+                "vibe_tags": {"type": "array", "items": {"type": "string"}},
+                "occasions": {"type": "array", "items": {"type": "string"}},
                 "source_chips": {"type": "array", "items": {"type": "string"}},
                 "trust_note": {"type": "string"},
             },
@@ -962,6 +966,8 @@ def _repair_restaurant_brief(place: dict[str, Any], data: dict[str, Any], contex
         "official_context_note": _clean_text(data.get("official_context_note") or "Official context, not signal evidence."),
         "signature_menu_items": _dedupe_display_values(data.get("signature_menu_items") or dish_values)[:8],
         "location_format": _clean_text(data.get("location_format") or _brief_location_format(place)),
+        "vibe_tags": [_clean_text(t) for t in (data.get("vibe_tags") or []) if _clean_text(t)][:5],
+        "occasions": [_clean_text(o) for o in (data.get("occasions") or []) if _clean_text(o)][:4],
         "source_chips": source_chips[:5] or ["Official context"],
         "trust_note": _clean_text(data.get("trust_note") or "Restaurant brief is context only; recent movement is handled in the signal sections below."),
     }
