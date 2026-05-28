@@ -904,27 +904,45 @@ def _generate_restaurant_brief(place: dict[str, Any], context: dict[str, Any]) -
     from openai import OpenAI
 
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    place_name = place.get("name") or ""
+    city = place.get("city") or place.get("neighborhood") or ""
+    search_hint = f"{place_name} {city}".strip()
+    instructions = [
+        f"You are researching a local restaurant called '{place_name}' in {city} for a food discovery product.",
+        f"Use the web_search tool to search for '{search_hint} restaurant' to find food reviews, articles, food blogs, or any content that describes what makes this place distinctive.",
+        "Also use the provided official documents and food facts.",
+        "Produce a Restaurant Brief with these structured fields. Be specific and concrete — name actual dishes, flavors, and characteristics. Write 3-4 sentences for what_it_is.",
+        "For highlight_items: extract 3-4 things that make this place distinctive. Each item needs a short aspect label (e.g. 'The Sauce', 'The Portion', 'The Atmosphere') and a 1-2 sentence detail. Only include what is supported by evidence.",
+        "For signature_menu_items: list each dish as 'Dish Name - brief description of what it is'. Include up to 6 items.",
+        "For vibe_tags: 3-5 short descriptors about dining format or atmosphere (e.g. 'Sit-down', 'BYOB', 'Counter seating', 'Group-friendly'). Only what is supported.",
+        "For occasions: 2-4 typical visit occasions (e.g. 'Date night', 'Family dinner', 'Late-night stop'). Do not invent.",
+        "Avoid recommendation language: no 'must try', 'best', 'top rated', 'you should'.",
+        "Output valid JSON only.",
+    ]
     prompt = {
-        "instructions": [
-            "Generate a source-backed Restaurant Brief for a LocalSignal signal detail page.",
-            "Use only official descriptions, menu documents, and source-backed food facts.",
-            "This is food context, not proof of recent momentum. Do not mention popularity unless it is clearly phrased as official/self-description context.",
-            "Do not write a long essay. Produce compact structured fields similar to a restaurant background card.",
-            "Avoid recommendation language such as must try, best, top rated, or you should.",
-            "For vibe_tags: extract 3-5 short descriptors from official context about the dining format, atmosphere, or seating style (e.g. 'Sit-down', 'BYOB', 'Counter seating', 'Group-friendly', 'Retro interior'). Only use what is supported by documents.",
-            "For occasions: list 2-4 typical visit occasions mentioned or implied in official documents (e.g. 'Date night', 'Family dinner', 'Weekend lunch', 'Late-night stop'). Do not invent occasions.",
-            "Output valid JSON only.",
-        ],
+        "instructions": instructions,
         "place": place,
         "context": context,
         "json_schema": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["what_it_is", "official_context_note", "signature_menu_items", "location_format", "vibe_tags", "occasions", "source_chips", "trust_note"],
+            "required": ["what_it_is", "official_context_note", "signature_menu_items", "highlight_items", "location_format", "vibe_tags", "occasions", "source_chips", "trust_note"],
             "properties": {
                 "what_it_is": {"type": "string"},
                 "official_context_note": {"type": "string"},
                 "signature_menu_items": {"type": "array", "items": {"type": "string"}},
+                "highlight_items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["aspect", "detail"],
+                        "properties": {
+                            "aspect": {"type": "string"},
+                            "detail": {"type": "string"},
+                        },
+                    },
+                },
                 "location_format": {"type": "string"},
                 "vibe_tags": {"type": "array", "items": {"type": "string"}},
                 "occasions": {"type": "array", "items": {"type": "string"}},
@@ -933,13 +951,14 @@ def _generate_restaurant_brief(place: dict[str, Any], context: dict[str, Any]) -
             },
         },
     }
+    model = os.getenv("OPENAI_MODEL_RICH", "gpt-4o")
     response = client.responses.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        model=model,
+        tools=[{"type": "web_search_preview"}],
         input=[
-            {"role": "system", "content": "You write concise, source-backed local restaurant context."},
+            {"role": "system", "content": "You research local restaurants using web search and provided documents. Return JSON only."},
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
         ],
-        temperature=0.2,
     )
     try:
         data = _parse_llm_json(response.output_text)
@@ -961,10 +980,17 @@ def _repair_restaurant_brief(place: dict[str, Any], data: dict[str, Any], contex
     what_it_is = _clean_text(data.get("what_it_is") or "")
     if not what_it_is:
         what_it_is = f"{place['name']} is a local restaurant in {place.get('neighborhood') or place.get('city') or 'the area'}."
+    raw_highlights = data.get("highlight_items") or []
+    highlight_items = [
+        {"aspect": _clean_text(h.get("aspect") or ""), "detail": _clean_text(h.get("detail") or "")}
+        for h in raw_highlights
+        if isinstance(h, dict) and _clean_text(h.get("aspect") or "") and _clean_text(h.get("detail") or "")
+    ][:4]
     return {
         "what_it_is": what_it_is,
         "official_context_note": _clean_text(data.get("official_context_note") or "Official context, not signal evidence."),
         "signature_menu_items": _dedupe_display_values(data.get("signature_menu_items") or dish_values)[:8],
+        "highlight_items": highlight_items,
         "location_format": _clean_text(data.get("location_format") or _brief_location_format(place)),
         "vibe_tags": [_clean_text(t) for t in (data.get("vibe_tags") or []) if _clean_text(t)][:5],
         "occasions": [_clean_text(o) for o in (data.get("occasions") or []) if _clean_text(o)][:4],

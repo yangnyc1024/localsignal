@@ -16,7 +16,7 @@ import type { ReactNode } from "react";
 
 import { getSignalDetail } from "@/lib/api";
 import { evidenceNotes, placeIdentity } from "@/lib/signalStory";
-import type { FoodSignal, RelatedSignal, RestaurantBrief, SignalDetail, SignalEvidenceItem } from "@/lib/types";
+import type { FoodSignal, HighlightItem, RelatedSignal, RestaurantBrief, SignalDetail, SignalEvidenceItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +126,7 @@ function AboutPlaceSection({ signal, cuisine }: { signal: SignalDetail; cuisine:
   const place = shortPlaceName(signal.place.name);
   const whatItIs = brief?.what_it_is || signal.evidence.place_profile?.known_for || "";
   const dishes = brief?.signature_menu_items?.slice(0, 6) ?? (signal.evidence.place_profile?.signature_items ?? []).slice(0, 6);
+  const highlights = (brief?.highlight_items ?? []) as HighlightItem[];
   const vibeTags = brief?.vibe_tags ?? [];
   const occasions = brief?.occasions ?? (signal.evidence.place_profile?.occasions ?? []).slice(0, 3);
   const locationFormat = brief?.location_format || signal.place.neighborhood || signal.city;
@@ -136,14 +137,29 @@ function AboutPlaceSection({ signal, cuisine }: { signal: SignalDetail; cuisine:
         <Utensils size={17} className="text-moss" />
         About this place
       </h2>
-      <div className="grid gap-5">
+      <div className="grid gap-6">
+        {/* Hero: name + description */}
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-moss">{cuisine}</div>
-          <p className="mt-2 max-w-3xl text-lg font-semibold leading-8 text-ink">{place}</p>
+          <p className="mt-2 text-xl font-semibold leading-7 text-ink">{place}</p>
           {whatItIs ? (
             <p className="mt-3 max-w-3xl text-base leading-7 text-ink/72">{cleanText(whatItIs)}</p>
           ) : null}
         </div>
+
+        {/* Highlight items — what makes it distinctive */}
+        {highlights.length > 0 ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {highlights.map((h) => (
+              <div key={h.aspect} className="rounded-lg border border-line bg-paper p-4">
+                <div className="text-sm font-semibold text-ink">{h.aspect}</div>
+                <p className="mt-1.5 text-sm leading-6 text-ink/66">{h.detail}</p>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Signature dishes + experience */}
         <div className="grid gap-3 sm:grid-cols-2">
           {dishes.length > 0 ? (
             <div className="rounded-lg border border-line bg-paper p-4">
@@ -185,6 +201,7 @@ function AboutPlaceSection({ signal, cuisine }: { signal: SignalDetail; cuisine:
             ) : null}
           </div>
         </div>
+
         {brief?.source_chips?.length ? (
           <div className="flex flex-wrap items-center gap-2 text-xs text-ink/48">
             <span className="font-semibold">Sources</span>
