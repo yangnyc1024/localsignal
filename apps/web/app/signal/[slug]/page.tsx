@@ -91,10 +91,10 @@ export default async function SignalDetailPage({ params }: Props) {
         </Section>
 
         <section className="grid gap-5 lg:grid-cols-[1fr_360px]">
-          <Section title="Momentum Over Time" icon={<TrendingUp size={17} />}>
+          <Section title="Signal vs Baseline" icon={<TrendingUp size={17} />}>
             <TrendChart points={chart} />
             <p className="mt-4 text-sm leading-6 text-ink/62">
-              This is a directional read of recent local movement, meant to separate a one-week blip from a more durable pattern.
+              Weekly mention count this week versus the trailing 30-day average. A gap here is what triggered this signal.
             </p>
           </Section>
 
@@ -445,15 +445,26 @@ function whyChanged(signal: SignalDetail) {
 }
 
 function trendPoints(signal: SignalDetail): ChartPoint[] {
-  const current = clamp(Math.round(signal.score), 0, 100);
-  const base = clamp(Math.round(signal.baseline_context.heat_score || current * 0.62), 0, 100);
-  const midpoint = clamp(Math.round((base + current) / 2), 0, 100);
-  const lift = Math.max(5, Math.round((current - base) / 3));
+  // Use real data only: trailing mention counts from baseline_profiles
+  // and the current window mention count from evidence.
+  const monthly = signal.baseline_context.trailing_30d_mentions || 0;
+  const weeklyBaseline = Math.round(monthly / 4);
+  const currentMentions =
+    (signal.evidence.current_mention_count as number | undefined) ||
+    (signal.evidence.mention_count as number | undefined) ||
+    0;
+
+  if (weeklyBaseline > 0 || currentMentions > 0) {
+    return [
+      { label: "Baseline/wk", value: weeklyBaseline },
+      { label: "This week", value: currentMentions }
+    ];
+  }
+
+  // Fall back to score comparison when mention data is absent
   return [
-    { label: "4w", value: clamp(base - lift, 0, 100) },
-    { label: "3w", value: base },
-    { label: "2w", value: midpoint },
-    { label: "Now", value: current }
+    { label: "Baseline", value: clamp(Math.round(signal.baseline_context.heat_score || 0), 0, 100) },
+    { label: "Now", value: clamp(Math.round(signal.score), 0, 100) }
   ];
 }
 
