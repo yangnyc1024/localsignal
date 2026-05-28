@@ -43,7 +43,7 @@ export function LocalBriefing({ report }: Props) {
   const filteredCards = activeFilter === "all" ? allCards : allCards.filter((card) => card.categoryKey === activeFilter);
 
   return (
-    <article className="mx-auto grid w-full max-w-[1180px] gap-8 px-4 py-7 md:px-8 md:py-10 lg:gap-10 lg:px-10">
+    <article className="mx-auto grid w-full max-w-[1520px] gap-8 px-4 py-7 md:px-8 md:py-10 lg:gap-10 lg:px-14 xl:px-20">
       <header className="grid gap-6 border-b border-line pb-8 lg:gap-8">
         {/* Top bar — full width */}
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold text-moss">
