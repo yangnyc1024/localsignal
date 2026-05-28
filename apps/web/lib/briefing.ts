@@ -188,7 +188,7 @@ function briefingFoodReads(report: Report) {
         return null;
       }
       return {
-        label: place.category || place.name,
+        label: cleanPlaceName(place.name),
         why: place.reason,
         href: `/signal/${signal.slug}`
       };

@@ -56,31 +56,34 @@ export function LocalBriefing({ report }: Props) {
           </span>
         </div>
 
-        {/* Two-column layout: title left, briefing card right */}
-        <div className="grid gap-6 lg:grid-cols-[1fr_400px] lg:items-start lg:gap-10">
-          {/* Title + description */}
-          <div className="grid min-w-0 gap-4">
-            <div className="text-sm font-semibold uppercase text-ink/48">Food briefing</div>
-            <h1 className="break-words text-4xl font-semibold leading-tight text-ink md:text-[3rem] lg:text-[3.4rem]">
-              {briefing.scopeTitle}
-            </h1>
-            <p className="text-lg leading-8 text-ink/72 lg:text-xl lg:leading-9">
-              {briefing.scopeSummary}
-            </p>
+        {/* Two-column layout: AI narrative title left, food-reads card right */}
+        <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start lg:gap-10">
+          {/* Dynamic headline + subtitle */}
+          <div className="grid min-w-0 gap-5">
+            <div>
+              <div className="text-sm font-semibold uppercase tracking-wide text-ink/44">Food briefing</div>
+              <h1 className="mt-3 break-words text-4xl font-semibold leading-tight text-ink md:text-[2.8rem] lg:text-[3.2rem]">
+                {briefing.title}
+              </h1>
+              <p className="mt-4 text-lg leading-8 text-ink/70 lg:text-xl lg:leading-9">
+                {briefing.subtitle}
+              </p>
+            </div>
+            {briefing.whyItMatters ? (
+              <p className="border-l-2 border-moss pl-4 text-base leading-7 text-ink/60">
+                {briefing.whyItMatters}
+              </p>
+            ) : null}
           </div>
 
-          {/* This week's read card */}
-          <section className="min-w-0 rounded-lg border border-line bg-white p-5 shadow-sm md:p-6 lg:p-7">
+          {/* What to open — compact navigation card */}
+          <section className="min-w-0 rounded-lg border border-line bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2 text-sm font-semibold text-moss">
               <Sparkles size={16} />
-              This week&apos;s read
+              What to open
             </div>
-            <h2 className="mt-3 break-words text-3xl font-semibold leading-tight text-ink md:text-[2.25rem] lg:text-[2.45rem]">
-              {briefing.title}
-            </h2>
-            <p className="mt-4 text-[17px] leading-8 text-ink/74 lg:text-lg lg:leading-8">{briefing.subtitle}</p>
             {briefing.foodReads.length ? (
-              <div className="mt-5 grid gap-3">
+              <div className="mt-4 grid gap-2.5">
                 {briefing.foodReads.map((read) => (
                   <Link
                     key={`${read.label}-${read.href}`}
@@ -88,17 +91,15 @@ export function LocalBriefing({ report }: Props) {
                     className="group grid gap-1 rounded-md border border-line bg-paper/75 p-3 transition hover:border-moss/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-moss/35"
                   >
                     <div className="flex min-w-0 items-center justify-between gap-3">
-                      <span className="break-words text-base font-semibold text-ink group-hover:text-moss">{read.label}</span>
-                      <ArrowUpRight size={15} className="shrink-0 text-moss" />
+                      <span className="break-words text-sm font-semibold text-ink group-hover:text-moss">{read.label}</span>
+                      <ArrowUpRight size={14} className="shrink-0 text-moss" />
                     </div>
-                    <p className="text-sm leading-6 text-ink/66">{read.why}</p>
+                    <p className="text-xs leading-5 text-ink/62">{read.why}</p>
                   </Link>
                 ))}
               </div>
             ) : (
-              <p className="mt-4 border-l-2 border-moss pl-4 text-base leading-7 text-ink/70">
-                {briefing.whyItMatters}
-              </p>
+              <p className="mt-4 text-sm leading-6 text-ink/60">{briefing.scopeSummary}</p>
             )}
           </section>
         </div>
