@@ -72,23 +72,21 @@ class BaselineContextDTO(BaseModel):
     delta_vs_baseline: Optional[str] = None
 
 
+class HighlightItemDTO(BaseModel):
+    aspect: str
+    detail: str
+
+
 class RestaurantBriefDTO(BaseModel):
     what_it_is: str
     official_context_note: str
     signature_menu_items: list[str] = Field(default_factory=list)
+    highlight_items: list[HighlightItemDTO] = Field(default_factory=list)
     location_format: str
+    vibe_tags: list[str] = Field(default_factory=list)
+    occasions: list[str] = Field(default_factory=list)
     source_chips: list[str] = Field(default_factory=list)
     trust_note: str
-
-
-class FoodFactDTO(BaseModel):
-    fact_type: Literal["dish", "occasion", "behavior"]
-    fact_value: str
-    evidence_text: str
-    source: str
-    source_url: Optional[str] = None
-    confidence: float
-    occurred_at: Optional[str] = None
 
 
 class SignalDetailDTO(SignalDTO):
@@ -103,7 +101,6 @@ class SignalDetailDTO(SignalDTO):
     baseline_context: BaselineContextDTO
     metrics: list[SignalMetricDTO]
     restaurant_brief: Optional[RestaurantBriefDTO] = None
-    food_facts: list[FoodFactDTO] = Field(default_factory=list)
     evidence_items: list[SignalEvidenceDTO]
     related_signals: list[RelatedSignalDTO]
 
