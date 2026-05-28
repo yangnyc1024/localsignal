@@ -13,7 +13,6 @@ from app.models import (
     FeedbackCreate,
     FeedbackDTO,
     EmailDeliveryDTO,
-    FoodFactDTO,
     ReportDTO,
     IngestionRunDTO,
     AlwaysHotDTO,
@@ -305,23 +304,6 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
     evidence = signal.get("evidence") or {}
     current_days = int(evidence.get("current_window_days") or 14)
     restaurant_brief = _restaurant_brief(conn, signal["place"]["id"])
-    food_fact_rows = conn.execute(
-        """
-        SELECT
-          fact_type,
-          fact_value,
-          evidence_text,
-          source,
-          source_url,
-          confidence::float AS confidence,
-          occurred_at::text AS occurred_at
-        FROM place_food_facts
-        WHERE place_id = %s
-        ORDER BY fact_type, confidence DESC
-        LIMIT 20
-        """,
-        (signal["place"]["id"],),
-    ).fetchall()
     evidence_chunks = conn.execute(
         """
         SELECT
@@ -444,7 +426,6 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
         "baseline_context": _baseline_context(signal),
         "metrics": signal.get("metrics") or _metrics(signal),
         "restaurant_brief": restaurant_brief,
-        "food_facts": [dict(row) for row in food_fact_rows],
         "evidence_items": [_evidence_item(row, signal) for row in evidence_chunks],
         "related_signals": related,
     }
@@ -900,7 +881,10 @@ def _restaurant_brief(conn, place_id: str) -> Optional[dict]:
         "what_it_is": metadata.get("what_it_is") or "",
         "official_context_note": metadata.get("official_context_note") or "Official context, not signal evidence.",
         "signature_menu_items": metadata.get("signature_menu_items") or [],
+        "highlight_items": metadata.get("highlight_items") or [],
         "location_format": metadata.get("location_format") or "",
+        "vibe_tags": metadata.get("vibe_tags") or [],
+        "occasions": metadata.get("occasions") or [],
         "source_chips": metadata.get("source_chips") or [],
         "trust_note": metadata.get("trust_note") or "Context only; recent movement is handled in the signal sections below.",
     }

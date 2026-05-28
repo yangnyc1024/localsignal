@@ -154,6 +154,7 @@ def _prompt(signal: dict, evidence: list[dict], place_context: Optional[dict[str
             "food_signal describes what food, flavor, or occasion is pulling the current signal.",
             "Separate durable place identity from recent signal movement: if the place is known for crab but recent evidence is about service, say that clearly.",
             "If food-level evidence is thin, say so in food_signal.summary and lower food_signal.confidence.",
+            "For food_signal.signal_dish: name the single most-mentioned specific dish or menu item found in evidence_chunks, using the exact name as it appears in reviews (e.g. 'Wang Tonkatsu', not just 'tonkatsu'). If no specific dish name appears in evidence, use empty string.",
             "For food_signal.image_query, write a short visual food query such as 'cajun seafood boil crab' or 'korean bbq grill'. Do not write a URL.",
             "Make card-level fields distinct: reader_hook should name the concrete dish, behavior, scene, or uncertainty; what_to_notice should not repeat the title; skeptic_note should state the main limitation calmly.",
             "If sentiment moved, describe it as a directional signal, not a review verdict.",
@@ -258,6 +259,7 @@ def _json_schema() -> dict[str, Any]:
                 "required": [
                     "summary",
                     "primary_pull",
+                    "signal_dish",
                     "flavor_cue",
                     "occasion",
                     "confidence",
@@ -268,6 +270,7 @@ def _json_schema() -> dict[str, Any]:
                 "properties": {
                     "summary": {"type": "string"},
                     "primary_pull": {"type": "string"},
+                    "signal_dish": {"type": "string"},
                     "flavor_cue": {"type": "string"},
                     "occasion": {"type": "string"},
                     "confidence": {"type": "string", "enum": ["High", "Medium", "Low"]},
@@ -551,6 +554,7 @@ def _repair_food_signal(signal: dict, food_signal: dict[str, Any], evidence: lis
         return repaired
 
     repaired["primary_pull"] = pull["primary_pull"]
+    repaired["signal_dish"] = repaired.get("signal_dish") or ""
     repaired["flavor_cue"] = repaired.get("flavor_cue") or pull.get("flavor_cue") or ""
     repaired["occasion"] = repaired.get("occasion") or pull.get("occasion") or ""
     repaired["image_query"] = repaired.get("image_query") if str(repaired.get("image_query") or "").lower() not in {"restaurant food", "food"} else pull["image_query"]
