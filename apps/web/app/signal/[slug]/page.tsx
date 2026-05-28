@@ -66,7 +66,7 @@ export default async function SignalDetailPage({ params }: Props) {
 
   return (
     <main className="min-h-screen">
-      <section className="mx-auto grid w-full max-w-[1520px] gap-7 px-4 py-8 md:px-8 md:py-10 lg:px-14 xl:px-20">
+      <section className="grid w-full gap-7 px-4 py-8 md:px-8 md:py-10 lg:px-10 xl:px-14">
         <Link href="/" className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-moss hover:underline">
           <ArrowLeft size={16} />
           Back to this week

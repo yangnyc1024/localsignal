@@ -43,7 +43,7 @@ export function LocalBriefing({ report }: Props) {
   const filteredCards = activeFilter === "all" ? allCards : allCards.filter((card) => card.categoryKey === activeFilter);
 
   return (
-    <article className="mx-auto grid w-full max-w-[1520px] gap-8 px-4 py-7 md:px-8 md:py-10 lg:gap-10 lg:px-14 xl:px-20">
+    <article className="grid w-full gap-8 px-4 py-7 md:px-8 md:py-10 lg:gap-10 lg:px-10 xl:px-14">
       <header className="grid gap-6 border-b border-line pb-8 lg:gap-8">
         {/* Top bar — full width */}
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold text-moss">
@@ -57,7 +57,7 @@ export function LocalBriefing({ report }: Props) {
         </div>
 
         {/* Two-column layout: AI narrative title left, food-reads card right */}
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start lg:gap-10">
+        <div className="grid gap-6 lg:grid-cols-[3fr_2fr] lg:items-start lg:gap-10">
           {/* Dynamic headline + subtitle */}
           <div className="grid min-w-0 gap-5">
             <div>
