@@ -881,7 +881,10 @@ def _restaurant_brief(conn, place_id: str) -> Optional[dict]:
         "what_it_is": metadata.get("what_it_is") or "",
         "official_context_note": metadata.get("official_context_note") or "Official context, not signal evidence.",
         "signature_menu_items": metadata.get("signature_menu_items") or [],
+        "highlight_items": metadata.get("highlight_items") or [],
         "location_format": metadata.get("location_format") or "",
+        "vibe_tags": metadata.get("vibe_tags") or [],
+        "occasions": metadata.get("occasions") or [],
         "source_chips": metadata.get("source_chips") or [],
         "trust_note": metadata.get("trust_note") or "Context only; recent movement is handled in the signal sections below.",
     }

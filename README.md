@@ -49,6 +49,8 @@ Then fill in the keys you want to use in `.env`:
 
 - `GOOGLE_PLACES_API_KEY` for place discovery and Google review evidence
 - `OPENAI_API_KEY` for weekly LLM enrichment
+- `OPENAI_MODEL` — model for signal enrichment (default `gpt-4.1-mini`)
+- `OPENAI_MODEL_RICH` — model for restaurant brief generation with web search (default `gpt-4o`; required for `web_search_preview`)
 - `RESEND_API_KEY`, `EMAIL_FROM`, and at least one active subscriber if you want to send email
 
 For real social metadata, put authorized export files in `data/social/` and point `.env` at the container paths:
