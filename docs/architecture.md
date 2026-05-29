@@ -225,6 +225,29 @@ The scheduler container must carry the same LLM-related environment as ad-hoc en
 - `PLACE_KNOWLEDGE_WEBSITE_ENABLED`
 - `PLACE_KNOWLEDGE_EMBED_ENABLED`
 
+## Place Knowledge Design Notes
+
+Place Knowledge is an **offline reference database** — it describes what a place *is*, independent of any weekly signal. It is built and refreshed independently of the signal pipeline. When a signal fires for a place, the enrichment step looks up Place Knowledge to provide stable identity context to the LLM (restaurant brief, menu, cuisine type, occasions, vibe).
+
+The intended refresh loop is:
+1. `discover_places` — populate/update the `places` table (run periodically or on-demand)
+2. `place_knowledge` — build restaurant briefs, crawl websites, embed documents (run after discovery or after a report)
+3. Signal pipeline consults Place Knowledge at enrichment time; it never writes to it
+
+**Known gaps in Place Knowledge coverage (as of May 2026):**
+
+- **Place discovery undercount**: `discover_places` finds ~150 places across Fort Lee, Edgewater, and Palisades Park. The actual number of food establishments is estimated 300–500+. Two root causes:
+  1. **No pagination**: Google Places Text Search returns max 20 results per query; the current code does not follow `next_page_token` (up to 3 pages / 60 results available per query).
+  2. **Sparse query set**: Only 7 query terms × 4 neighborhood targets = 28 queries. Missing: Chinese, Japanese, ramen, sushi, seafood boil, BBQ, bubble tea, pizza, brunch, and other common cuisines in the area.
+
+- **Category granularity too coarse**: 82 of 150 places are classified as `restaurant` with no sub-category. Korean BBQ, Japanese ramen, Cajun seafood, and dim sum are all bucketed together, which degrades `cuisineType()` inference and category-based filtering.
+
+- **Menu data thin**: Only 12 places have menu documents. Menus are the highest-signal source for dish names and price range context. Should be a priority data source (Yelp API, Google menu data, or website scraping).
+
+- **Duplicate places**: At least one confirmed duplicate (`Kuppi Coffee Company` appears twice in Edgewater). Discovery deduplication relies on `google_place_id` uniqueness but the same business can appear under different query terms with slightly different metadata.
+
+- **No staleness detection**: Closed or relocated places are not pruned. Restaurant briefs are not re-generated when a place changes significantly (new ownership, menu overhaul). No `last_verified_at` mechanism.
+
 ## Current Debt
 
 - `signals.evidence` bag still carries several LLM narrative fields (`reader_hook`, `skeptic_note`, `good_for`, `watch_out`, `best_read_as`, etc.). These are currently only read by the API presenter layer. Avoid adding more durable place facts to it.
