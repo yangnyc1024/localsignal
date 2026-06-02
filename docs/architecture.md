@@ -24,6 +24,8 @@ flowchart TD
   G --> H["LLM signal enrichment"]
   H --> E
   H --> I["Place profiles + Restaurant briefs"]
+  I --> FF["place_food_facts"]
+  FF --> H
   E --> J["Weekly reports"]
   I --> K["FastAPI product DTOs"]
   J --> K
@@ -35,9 +37,12 @@ flowchart TD
 1. Ingestion writes normalized source material into `raw_source_items`, `mentions`, and `evidence_chunks`.
 2. The signal engine ranks candidate changes and writes published rows into `signals`.
 3. `run_place_knowledge` converts existing evidence, Google/place details, and website text into `place_documents`.
-4. `build_restaurant_brief_documents` uses GPT-4o with `web_search_preview` to generate a structured restaurant brief per place, stored in `place_documents` with `content_type='restaurant_brief'`. The structured JSON is stored in `place_documents.metadata`; a text version is stored in `place_documents.content` for RAG retrieval.
-5. `place_documents.embedding` stores OpenAI `text-embedding-3-small` vectors in pgvector.
-6. LLM enrichment retrieves the most relevant `place_documents` for a place/signal and writes signal-local food interpretation into the dedicated `signals.food_signal` JSONB column. The API merges it back into `evidence.food_signal` in responses for backward compatibility.
+4. `build_restaurant_brief_documents` uses GPT-4o with `web_search_preview` to generate a structured restaurant brief per place, stored in `place_documents` with `content_type='restaurant_brief'`. The structured JSON is stored in `place_documents.metadata`; a text version is stored in `place_documents.content` for RAG retrieval. Briefs are regenerated only when stale (default: older than 7 days, configurable via `PLACE_KNOWLEDGE_BRIEF_STALENESS_DAYS`).
+5. After each brief is written, two additional steps run immediately — no extra LLM calls:
+   - `extract_place_food_facts_from_brief()` extracts `signature_menu_items` (as `dish` facts) and `highlight_items` (as `behavior` facts) into `place_food_facts` with per-fact confidence scores and hash-based dedup.
+   - `_upsert_profile_from_brief()` maps `what_it_is` → `known_for`, `signature_menu_items` → `signature_items`, `vibe_tags`+`highlight_items` → `flavor_cues`, `occasions` → `occasions` into `place_profiles`. Every place that gets a brief immediately gets a profile — no signal required.
+6. `place_documents.embedding` stores OpenAI `text-embedding-3-small` vectors in pgvector.
+7. LLM enrichment retrieves the most relevant `place_documents` for a place/signal **plus** any verified `place_food_facts` for that place, and passes both to the LLM as context. Food facts serve as high-confidence anchors for `food_signal.signal_dish` and `place_profile.signature_items`. Signal writes use `merge_place_profile()` to accumulate profile data across weeks rather than overwriting. The API merges `evidence.food_signal` in responses for backward compatibility.
 7. Report generation writes `reports`, `report_signals`, and `reports.briefing`.
 8. FastAPI returns product-shaped DTOs. The web app should not need to know database internals.
 
@@ -53,10 +58,13 @@ Describes **what a place is** — independent of time, updated periodically.
 |---|---|
 | `places` | Canonical identity, location, map metadata |
 | `place_documents` | Retrieval corpus: crawled docs, menus, official descriptions, and LLM-generated briefs |
-| `place_profiles` | Durable summary: known_for, food_types, signature_items, flavor_cues, occasions |
+| `place_profiles` | Durable summary: known_for, food_types, signature_items, flavor_cues, occasions. Updated via `merge_place_profile()` so data accumulates across weekly signal runs. |
+| `place_food_facts` | Verified dish and behavior facts extracted from restaurant briefs. Each row has a `fact_type` (`dish` / `behavior`), `confidence`, and `evidence_hash` for dedup. Used as high-confidence anchors in signal enrichment. |
 | `baseline_profiles` | Historical heat scores and trailing mention counts |
 
 `place_documents` with `content_type='restaurant_brief'` is the primary source for the "About this place" section. The `metadata` column carries the structured brief (JSON) and `content` carries a text version for embedding/RAG.
+
+`place_food_facts` is the cross-signal dish knowledge base. It is written when a restaurant brief is produced and queried at signal enrichment time to improve `food_signal.signal_dish` accuracy without relying on per-run text pattern matching.
 
 ### Signal Knowledge (temporal)
 
@@ -82,9 +90,13 @@ Canonical identity, location, map metadata, Google place id, and category.
 
 Retrieval corpus. Holds review snippets, evidence chunks, Google context, official descriptions, website/menu text, and LLM-generated restaurant briefs. Restaurant briefs (`content_type='restaurant_brief'`) are produced by `build_restaurant_brief_documents()` and stored with full structured JSON in `metadata`.
 
+`place_food_facts`
+
+Verified dish and behavior facts extracted from restaurant briefs. Rows accumulate over time via hash-based dedup (`evidence_hash`). Confidence values: `0.7` for dishes from `signature_menu_items`, `0.6` for behaviors from `highlight_items`. Signal enrichment queries this table first before falling back to text pattern matching.
+
 `place_profiles`
 
-Durable profile summary for a place. API responses should prefer this table over old snapshots inside `signals.evidence.place_profile`.
+Durable profile summary for a place. Updated by `merge_place_profile()` which accumulates list fields (`signature_items`, `food_types`, `flavor_cues`, `occasions`) across weekly runs rather than overwriting them. API responses should prefer this table over old snapshots inside `signals.evidence.place_profile`.
 
 `signals`
 
@@ -104,21 +116,33 @@ Generated by `localsignal_engine.place_knowledge.build_restaurant_brief_document
 
 **Model:** `gpt-4o` (configured via `OPENAI_MODEL_RICH`, default `gpt-4o`)
 
+**Staleness:** Briefs are skipped when the most recent `place_documents` row with `content_type='restaurant_brief'` was updated within `PLACE_KNOWLEDGE_BRIEF_STALENESS_DAYS` days (default: `7`). This avoids unnecessary gpt-4o calls on unchanged places.
+
+**Post-write extraction:** After each brief is written, `extract_place_food_facts_from_brief()` automatically extracts structured facts into `place_food_facts`:
+- `signature_menu_items` → `fact_type='dish'`, confidence `0.7`
+- `highlight_items` → `fact_type='behavior'`, confidence `0.6`
+- Rows are hash-deduped; existing rows with lower confidence are upgraded.
+
 **Retrieval:** Uses `web_search_preview` tool to search `"{place_name} {city} restaurant"` in addition to official documents and menu facts from `place_documents`.
 
 **Output shape:**
 
 ```python
 {
-  "what_it_is": str,              # 2-3 sentence description
+  "what_it_is": str,              # 2-3 sentence description → place_profiles.known_for
+  "cuisine_types": [str],         # 1-3 specific cuisine labels → place_profiles.food_types
+                                  # e.g. "Korean BBQ", "Cajun / Seafood Boil", "Bakery / Café"
+  "flavor_cues": [str],           # 2-4 taste/ingredient descriptors → place_profiles.flavor_cues
+                                  # e.g. "grilled meat", "crispy cutlet", "fresh seafood"
+                                  # Must describe taste/texture/ingredients — not atmosphere/format
   "official_context_note": str,   # stable official context
-  "signature_menu_items": [str],  # up to 8 items, "Name: description" format
-  "highlight_items": [            # up to 4 distinctive aspects
+  "signature_menu_items": [str],  # up to 8 items, "Name - description" format → place_profiles.signature_items
+  "highlight_items": [            # up to 4 distinctive aspects (food OR atmosphere)
     {"aspect": str, "detail": str}
   ],
   "location_format": str,         # "Neighborhood · category"
-  "vibe_tags": [str],             # up to 5 atmosphere tags
-  "occasions": [str],             # up to 4 use cases
+  "vibe_tags": [str],             # up to 5 atmosphere/format tags (Sit-down, BYOB, etc.)
+  "occasions": [str],             # up to 4 use cases → place_profiles.occasions
   "source_chips": [str],          # provenance labels
   "trust_note": str,              # context-only disclaimer
 }
@@ -126,9 +150,21 @@ Generated by `localsignal_engine.place_knowledge.build_restaurant_brief_document
 
 The brief is stored in `place_documents.metadata` (structured JSON for API) and `place_documents.content` (text for RAG embedding). `place_documents.source` is `localsignal_restaurant_brief`.
 
+**Direct mapping to `place_profiles` (no post-processing):**
+
+| Brief field | → | `place_profiles` column |
+|---|---|---|
+| `what_it_is` | → | `known_for` |
+| `cuisine_types` | → | `food_types` |
+| `flavor_cues` | → | `flavor_cues` |
+| `signature_menu_items` (dish name only) | → | `signature_items` |
+| `occasions` | → | `occasions` |
+
+No keyword extraction or blocklist filtering — the LLM is responsible for producing correct values in each field.
+
 ## Food Signal
 
-Generated per signal by `localsignal_engine.llm_signal` from `evidence_chunks` in the current week window.
+Generated per signal by `localsignal_engine.llm_signal` from `evidence_chunks` in the current week window, enriched with `place_food_facts` as stable dish anchors.
 
 **Output shape (stored in `signals.food_signal` column; API response also includes it as `evidence.food_signal` for backward compatibility):**
 
@@ -146,7 +182,7 @@ Generated per signal by `localsignal_engine.llm_signal` from `evidence_chunks` i
 }
 ```
 
-`signal_dish` names the single most-mentioned specific dish or menu item found in evidence_chunks for that week, using the exact name as it appears in reviews.
+`signal_dish` names the single most-mentioned specific dish or menu item for the signal. When the LLM returns a generic label ("food", "restaurant"), enrichment falls back to `place_food_facts` (confidence ≥ 0.6, LLM-extracted from restaurant briefs) — no keyword/regex pattern matching.
 
 ## Detail Page Contract
 
@@ -224,6 +260,7 @@ The scheduler container must carry the same LLM-related environment as ad-hoc en
 - `PLACE_KNOWLEDGE_GOOGLE_ENABLED`
 - `PLACE_KNOWLEDGE_WEBSITE_ENABLED`
 - `PLACE_KNOWLEDGE_EMBED_ENABLED`
+- `PLACE_KNOWLEDGE_BRIEF_STALENESS_DAYS` — skip restaurant brief regeneration if updated within this many days (default: `7`)
 
 ## Place Knowledge Design Notes
 
@@ -231,8 +268,25 @@ Place Knowledge is an **offline reference database** — it describes what a pla
 
 The intended refresh loop is:
 1. `discover_places` — populate/update the `places` table (run periodically or on-demand)
-2. `place_knowledge` — build restaurant briefs, crawl websites, embed documents (run after discovery or after a report)
-3. Signal pipeline consults Place Knowledge at enrichment time; it never writes to it
+2. `place_knowledge` — build restaurant briefs (skipped if fresh), crawl websites, embed documents (run after discovery or after a report)
+3. Brief generation automatically:
+   - writes structured dish/behavior facts into `place_food_facts` via `extract_place_food_facts_from_brief()`
+   - builds/merges `place_profiles` from the brief immediately via `_upsert_profile_from_brief()` — no LLM call, no signal required
+4. Signal pipeline queries `place_food_facts` at enrichment time for high-confidence dish anchors, then retrieves `place_documents` via embedding similarity
+
+**`place_profiles.known_for` is derived directly from `restaurant_brief.what_it_is`** — the gpt-4o web-search call that produces the brief also produces `known_for`. No separate LLM call is needed for profile generation.
+
+To backfill all profiles and food_facts from existing restaurant briefs (e.g. after a schema change or first deploy):
+
+```bash
+python -m localsignal_engine.run_place_knowledge --build-profiles --extract-food-facts
+```
+
+To regenerate briefs (respects staleness window) and immediately rebuild profiles:
+
+```bash
+python -m localsignal_engine.run_place_knowledge --restaurant-brief --build-profiles
+```
 
 **Known gaps in Place Knowledge coverage (as of May 2026):**
 
@@ -240,13 +294,13 @@ The intended refresh loop is:
   1. **No pagination**: Google Places Text Search returns max 20 results per query; the current code does not follow `next_page_token` (up to 3 pages / 60 results available per query).
   2. **Sparse query set**: Only 7 query terms × 4 neighborhood targets = 28 queries. Missing: Chinese, Japanese, ramen, sushi, seafood boil, BBQ, bubble tea, pizza, brunch, and other common cuisines in the area.
 
-- **Category granularity too coarse**: 82 of 150 places are classified as `restaurant` with no sub-category. Korean BBQ, Japanese ramen, Cajun seafood, and dim sum are all bucketed together, which degrades `cuisineType()` inference and category-based filtering.
+- **Category granularity too coarse**: 82 of 150 places are classified as `restaurant` with no sub-category. This degrades category-based filtering. However, `place_profiles.food_types` now carries LLM-generated cuisine labels (e.g. "Korean BBQ", "Cajun / Seafood Boil") derived from the restaurant brief — these are more granular and should be used in preference to `places.category` for display and filtering.
 
 - **Menu data thin**: Only 12 places have menu documents. Menus are the highest-signal source for dish names and price range context. Should be a priority data source (Yelp API, Google menu data, or website scraping).
 
 - **Duplicate places**: At least one confirmed duplicate (`Kuppi Coffee Company` appears twice in Edgewater). Discovery deduplication relies on `google_place_id` uniqueness but the same business can appear under different query terms with slightly different metadata.
 
-- **No staleness detection**: Closed or relocated places are not pruned. Restaurant briefs are not re-generated when a place changes significantly (new ownership, menu overhaul). No `last_verified_at` mechanism.
+- **Partial staleness detection**: Restaurant briefs now have a staleness window (`PLACE_KNOWLEDGE_BRIEF_STALENESS_DAYS`, default 7 days) — stale briefs are regenerated weekly. However, there is still no mechanism to detect closed or relocated places, or to force re-generation after significant changes (new ownership, menu overhaul). A `last_verified_at` or manual invalidation flag would address this.
 
 ## Current Debt
 
@@ -254,8 +308,9 @@ The intended refresh loop is:
 - `place_knowledge.py` owns prompts, validation, repair, brief generation, and food signal logic. Split it once the product contract stabilizes.
 - `place_documents` has the vector index; `evidence_chunks.embedding` and `mentions.embedding` are available but not yet part of the active retrieval path.
 - API still performs some fallback shaping for older rows. New code should move durable intelligence into tables first, then have API expose it cleanly.
-- `place_food_facts` table and the `DISH_TERMS` regex extraction pipeline are deprecated. Dish discovery is now handled by `restaurant_brief.signature_menu_items` (LLM + web search) and `food_signal.signal_dish` (weekly evidence extraction).
+- `place_food_facts` is now active: written by `extract_place_food_facts_from_brief()` after each restaurant brief generation, and queried by signal enrichment as high-confidence dish anchors. Any old `DISH_TERMS` regex extraction code predating this pipeline should be removed if found.
 - `place_documents` conflates input documents (crawled content) and output documents (LLM-generated briefs). Consider a dedicated `place_briefs` table when the schema stabilizes.
+- Existing restaurant briefs (generated before `cuisine_types`/`flavor_cues` were added to the schema) will have empty `food_types` and `flavor_cues` in `place_profiles` until briefs are regenerated. Force a refresh with `--restaurant-brief --build-profiles` or wait for the 7-day staleness window.
 
 ## API Structure
 
@@ -283,9 +338,11 @@ Router modules stay thin (HTTP concerns only). All shaping logic lives in `prese
 
 ## Near-Term Architecture Direction
 
-1. Keep `place_profiles` as the canonical place profile source for durable computed fields.
+1. Keep `place_profiles` as the canonical place profile source for durable computed fields. Profile updates use `merge_place_profile()` — accumulating list fields across weekly runs, never replacing them wholesale. The brief is the authoritative source and always does a full replace via `_upsert_profile_from_brief()`.
 2. Keep restaurant briefs in `place_documents` (metadata + content) until volume warrants a dedicated table.
 3. `signals.food_signal` is now a dedicated column — extend signal-specific fields there, not into the evidence bag.
-4. Keep `place_documents` as the active RAG corpus.
-5. Prefer explicit SQL/Python orchestration over a framework until retrieval becomes multi-hop or multi-agent.
-6. Treat the web app as a rendering layer. Product intelligence should arrive through API DTOs, not be invented in React.
+4. Keep `place_documents` as the active RAG corpus; `place_food_facts` is the structured dish/behavior index layered on top.
+5. `place_food_facts` is the right place for cross-signal, cross-week dish knowledge. It accumulates from briefs and is queried by signal enrichment as high-confidence anchors. Do not duplicate this into the evidence bag.
+6. No rule-based keyword extraction for cuisine or flavor classification. The LLM is responsible for producing correct values in `cuisine_types` and `flavor_cues` as part of the restaurant brief. The system maps those fields directly with no post-processing.
+6. Prefer explicit SQL/Python orchestration over a framework until retrieval becomes multi-hop or multi-agent.
+7. Treat the web app as a rendering layer. Product intelligence should arrive through API DTOs, not be invented in React.

@@ -242,17 +242,31 @@ def ingest_website_documents(conn, place_ids: Optional[list[str]] = None) -> int
 
 
 
+BRIEF_STALENESS_DAYS = int(os.getenv("PLACE_KNOWLEDGE_BRIEF_STALENESS_DAYS", "7"))
+
+
 def build_restaurant_brief_documents(conn, place_ids: Optional[list[str]] = None) -> int:
     ensure_place_knowledge_schema(conn)
     if not os.getenv("OPENAI_API_KEY"):
         return 0
     written = 0
     for place in _places(conn, place_ids):
+        if _brief_is_fresh(conn, place["id"]):
+            continue
         context = _restaurant_brief_context(conn, place["id"])
         brief = _generate_restaurant_brief(place, context)
         if not brief:
             continue
         content = _restaurant_brief_content(place, brief)
+        full_metadata = {
+            **brief,
+            "source_type": "llm_generated_context",
+            "trust_level": "context_only",
+            "source_documents": {
+                "official": len(context["official_documents"]),
+                "menu": len(context["menu_documents"]),
+            },
+        }
         if upsert_place_document(
             conn,
             place_id=place["id"],
@@ -261,18 +275,232 @@ def build_restaurant_brief_documents(conn, place_ids: Optional[list[str]] = None
             title=f"Restaurant brief for {place['name']}",
             content=content,
             content_type="restaurant_brief",
-            metadata={
-                **brief,
-                "source_type": "llm_generated_context",
-                "trust_level": "context_only",
-                "source_documents": {
-                    "official": len(context["official_documents"]),
-                    "menu": len(context["menu_documents"]),
-                },
-            },
+            metadata=full_metadata,
         ):
             written += 1
+            extract_place_food_facts_from_brief(conn, place["id"], brief)
+            # Build/merge place_profile immediately from the new brief
+            _upsert_profile_from_brief(conn, place, full_metadata)
     return written
+
+
+def _upsert_profile_from_brief(conn, place: dict[str, Any], brief_metadata: dict[str, Any]) -> None:
+    """Map a restaurant_brief metadata dict to place_profiles columns and upsert.
+
+    Uses LLM-generated fields directly — no keyword extraction or post-processing:
+      what_it_is        → known_for
+      cuisine_types     → food_types   (LLM-generated cuisine labels)
+      flavor_cues       → flavor_cues  (LLM-generated taste/ingredient descriptors)
+      signature_menu_items → signature_items
+      occasions         → occasions
+
+    Brief is the authoritative source — always replaces, not merges.
+    merge_place_profile() is for signal-derived incremental updates.
+    """
+    what_it_is = _clean_text(brief_metadata.get("what_it_is") or "")
+    if not what_it_is:
+        return
+
+    raw_items: list[str] = brief_metadata.get("signature_menu_items") or []
+    signature_items = _dedupe_display_values([item.split(" - ")[0].strip() for item in raw_items])[:8]
+    food_types = _dedupe_display_values(brief_metadata.get("cuisine_types") or [])[:3]
+    flavor_cues = _dedupe_display_values(brief_metadata.get("flavor_cues") or [])[:4]
+    occasions = [_clean_text(o) for o in (brief_metadata.get("occasions") or []) if _clean_text(o)]
+
+    source_docs = brief_metadata.get("source_documents") or {}
+    profile = {
+        "known_for": what_it_is,
+        "food_types": food_types,
+        "signature_items": signature_items,
+        "flavor_cues": flavor_cues,
+        "occasions": occasions,
+        "caveats": _clean_text(brief_metadata.get("trust_note") or "Profile is derived from restaurant brief; keep claims limited to context only."),
+        "source_count": int(source_docs.get("official") or 0) + int(source_docs.get("menu") or 0) + len(signature_items),
+    }
+    upsert_place_profile(conn, place["id"], profile)
+
+
+def build_place_profiles_from_briefs(conn, place_ids: Optional[list[str]] = None) -> int:
+    """Offline-build place_profiles for all places that have a restaurant_brief.
+
+    Maps LLM-generated brief fields directly — no keyword extraction:
+      what_it_is        → known_for
+      cuisine_types     → food_types   (LLM-generated cuisine labels)
+      flavor_cues       → flavor_cues  (LLM-generated taste/ingredient descriptors)
+      signature_menu_items → signature_items
+      occasions         → occasions
+    """
+    ensure_place_knowledge_schema(conn)
+    place_filter = "AND pd.place_id = ANY(%s::uuid[])" if place_ids else ""
+    params = (place_ids,) if place_ids else ()
+    rows = conn.execute(
+        f"""
+        SELECT
+          pd.place_id::text AS place_id,
+          p.name,
+          p.category,
+          pd.metadata,
+          pd.fetched_at
+        FROM place_documents pd
+        JOIN places p ON p.id = pd.place_id
+        WHERE pd.content_type = 'restaurant_brief'
+          AND pd.metadata ? 'what_it_is'
+          {place_filter}
+        ORDER BY pd.fetched_at DESC
+        """,
+        params,
+    ).fetchall()
+
+    seen: set[str] = set()
+    written = 0
+    for row in rows:
+        place_id = row["place_id"]
+        if place_id in seen:
+            continue
+        seen.add(place_id)
+        brief_metadata = row["metadata"] if isinstance(row["metadata"], dict) else {}
+        if not _clean_text(brief_metadata.get("what_it_is") or ""):
+            continue
+        place = {"id": place_id, "category": row.get("category") or ""}
+        _upsert_profile_from_brief(conn, place, brief_metadata)
+        written += 1
+    return written
+
+
+def extract_place_food_facts_from_brief(conn, place_id: str, brief: dict[str, Any]) -> int:
+    """Persist dish facts from a restaurant_brief into place_food_facts for cross-signal reuse."""
+    items: list[str] = brief.get("signature_menu_items") or []
+    highlight_items: list[dict] = brief.get("highlight_items") or []
+    written = 0
+    for raw in items:
+        text = _clean_text(str(raw or ""))
+        if not text:
+            continue
+        dish_name = text.split(" - ")[0].strip()
+        normalized = dish_name.lower()
+        evidence_hash = _text_hash(f"{place_id}:dish:{normalized}")
+        conn.execute(
+            """
+            INSERT INTO place_food_facts (
+              place_id, fact_type, fact_value, normalized_value,
+              evidence_text, source, confidence, evidence_hash
+            )
+            VALUES (%s, 'dish', %s, %s, %s, 'restaurant_brief', 0.7, %s)
+            ON CONFLICT (place_id, fact_type, normalized_value, evidence_hash) DO UPDATE SET
+              fact_value = EXCLUDED.fact_value,
+              evidence_text = EXCLUDED.evidence_text,
+              confidence = GREATEST(place_food_facts.confidence, EXCLUDED.confidence),
+              updated_at = now()
+            """,
+            (place_id, dish_name, normalized, text, evidence_hash),
+        )
+        written += 1
+    for h in highlight_items:
+        aspect = _clean_text(str(h.get("aspect") or ""))
+        detail = _clean_text(str(h.get("detail") or ""))
+        if not aspect or not detail:
+            continue
+        normalized = aspect.lower()
+        evidence_hash = _text_hash(f"{place_id}:behavior:{normalized}")
+        conn.execute(
+            """
+            INSERT INTO place_food_facts (
+              place_id, fact_type, fact_value, normalized_value,
+              evidence_text, source, confidence, evidence_hash
+            )
+            VALUES (%s, 'behavior', %s, %s, %s, 'restaurant_brief', 0.6, %s)
+            ON CONFLICT (place_id, fact_type, normalized_value, evidence_hash) DO UPDATE SET
+              evidence_text = EXCLUDED.evidence_text,
+              updated_at = now()
+            """,
+            (place_id, aspect, normalized, detail, evidence_hash),
+        )
+        written += 1
+    return written
+
+
+def get_place_food_facts(conn, place_id: str, fact_type: Optional[str] = None, min_confidence: float = 0.5) -> list[dict[str, Any]]:
+    """Retrieve persisted food facts for a place, ordered by confidence."""
+    if fact_type:
+        rows = conn.execute(
+            """
+            SELECT fact_type, fact_value, normalized_value, evidence_text, source, confidence
+            FROM place_food_facts
+            WHERE place_id = %s AND fact_type = %s AND confidence >= %s
+            ORDER BY confidence DESC, updated_at DESC
+            LIMIT 20
+            """,
+            (place_id, fact_type, min_confidence),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT fact_type, fact_value, normalized_value, evidence_text, source, confidence
+            FROM place_food_facts
+            WHERE place_id = %s AND confidence >= %s
+            ORDER BY confidence DESC, updated_at DESC
+            LIMIT 30
+            """,
+            (place_id, min_confidence),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def merge_place_profile(conn, place_id: str, new_profile: dict[str, Any]) -> None:
+    """Merge new signal-derived profile data into existing place_profiles, accumulating lists across weeks."""
+    existing = place_profile(conn, place_id)
+    if not existing:
+        upsert_place_profile(conn, place_id, new_profile)
+        return
+
+    def _merge_list(old: list, new: list) -> list:
+        seen: set[str] = set()
+        merged: list[str] = []
+        for item in list(old) + list(new):
+            key = str(item).strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                merged.append(str(item).strip())
+        return merged[:8]
+
+    merged = dict(existing)
+    # Always take the newer known_for if it's richer
+    new_known = str(new_profile.get("known_for") or "").strip()
+    old_known = str(merged.get("known_for") or "").strip()
+    if new_known and len(new_known) > len(old_known):
+        merged["known_for"] = new_known
+
+    merged["food_types"] = _merge_list(merged.get("food_types") or [], new_profile.get("food_types") or [])
+    merged["signature_items"] = _merge_list(merged.get("signature_items") or [], new_profile.get("signature_items") or [])
+    merged["flavor_cues"] = _merge_list(merged.get("flavor_cues") or [], new_profile.get("flavor_cues") or [])
+    merged["occasions"] = _merge_list(merged.get("occasions") or [], new_profile.get("occasions") or [])
+    merged["source_count"] = max(int(merged.get("source_count") or 0), int(new_profile.get("source_count") or 0))
+    if new_profile.get("caveats"):
+        merged["caveats"] = new_profile["caveats"]
+
+    upsert_place_profile(conn, place_id, merged)
+
+
+def _brief_is_fresh(conn, place_id: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT updated_at FROM place_documents
+        WHERE place_id = %s AND content_type = 'restaurant_brief'
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """,
+        (place_id,),
+    ).fetchone()
+    if not row:
+        return False
+    from datetime import timezone
+    age = datetime.now(timezone.utc) - row["updated_at"].replace(tzinfo=timezone.utc)
+    return age.days < BRIEF_STALENESS_DAYS
+
+
+def _text_hash(value: str) -> str:
+    import hashlib
+    return hashlib.sha256(value.encode()).hexdigest()[:32]
 
 
 def embed_place_documents(conn, place_ids: Optional[list[str]] = None, limit: int = 200) -> int:
@@ -555,6 +783,8 @@ def _generate_restaurant_brief(place: dict[str, Any], context: dict[str, Any]) -
         f"Use the web_search tool to search for '{search_hint} restaurant' to find food reviews, articles, food blogs, or any content that describes what makes this place distinctive.",
         "Also use the provided official documents and food facts.",
         "Produce a Restaurant Brief with these structured fields. Be specific and concrete — name actual dishes, flavors, and characteristics. Write 3-4 sentences for what_it_is.",
+        "For cuisine_types: 1-3 specific cuisine or food-category labels (e.g. 'Korean BBQ', 'Cajun Seafood', 'Japanese Ramen', 'Bakery / Café'). Be specific — not just 'Restaurant' or 'Food'. Only what is supported by evidence.",
+        "For flavor_cues: 2-4 short food or taste descriptors that capture what the food is like (e.g. 'grilled meat', 'spicy broth', 'crispy cutlet', 'fresh seafood', 'house-made pastry'). These must describe taste, texture, or ingredients — not atmosphere, format, or service. Do not include words like 'cozy', 'sit-down', 'generous portions', or 'work-friendly'.",
         "For highlight_items: extract 3-4 things that make this place distinctive. Each item needs a short aspect label (e.g. 'The Sauce', 'The Portion', 'The Atmosphere') and a 1-2 sentence detail. Only include what is supported by evidence.",
         "For signature_menu_items: list each dish as 'Dish Name - brief description of what it is'. Include up to 6 items.",
         "For vibe_tags: 3-5 short descriptors about dining format or atmosphere (e.g. 'Sit-down', 'BYOB', 'Counter seating', 'Group-friendly'). Only what is supported.",
@@ -569,9 +799,11 @@ def _generate_restaurant_brief(place: dict[str, Any], context: dict[str, Any]) -
         "json_schema": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["what_it_is", "official_context_note", "signature_menu_items", "highlight_items", "location_format", "vibe_tags", "occasions", "source_chips", "trust_note"],
+            "required": ["what_it_is", "cuisine_types", "flavor_cues", "official_context_note", "signature_menu_items", "highlight_items", "location_format", "vibe_tags", "occasions", "source_chips", "trust_note"],
             "properties": {
                 "what_it_is": {"type": "string"},
+                "cuisine_types": {"type": "array", "items": {"type": "string"}},
+                "flavor_cues": {"type": "array", "items": {"type": "string"}},
                 "official_context_note": {"type": "string"},
                 "signature_menu_items": {"type": "array", "items": {"type": "string"}},
                 "highlight_items": {
@@ -629,8 +861,12 @@ def _repair_restaurant_brief(place: dict[str, Any], data: dict[str, Any], contex
         for h in raw_highlights
         if isinstance(h, dict) and _clean_text(h.get("aspect") or "") and _clean_text(h.get("detail") or "")
     ][:4]
+    cuisine_types = _dedupe_display_values(data.get("cuisine_types") or [])[:3]
+    flavor_cues = _dedupe_display_values(data.get("flavor_cues") or [])[:4]
     return {
         "what_it_is": what_it_is,
+        "cuisine_types": cuisine_types,
+        "flavor_cues": flavor_cues,
         "official_context_note": _clean_text(data.get("official_context_note") or "Official context, not signal evidence."),
         "signature_menu_items": _dedupe_display_values(data.get("signature_menu_items") or [])[:8],
         "highlight_items": highlight_items,

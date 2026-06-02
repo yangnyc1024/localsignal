@@ -1,6 +1,7 @@
 import os
 
 import psycopg
+from psycopg.rows import dict_row
 
 from localsignal_engine.baseline import compute_baseline_profiles
 from localsignal_engine.db import (
@@ -19,6 +20,7 @@ from localsignal_engine.ingestion.live import fetch_live_mentions, fetch_social_
 from localsignal_engine.llm import enrich_report_signals_with_llm
 from localsignal_engine.ml_engine import generate_report_signals
 from localsignal_engine.place_knowledge import (
+    build_place_profiles_from_briefs,
     build_restaurant_brief_documents,
     embed_place_documents,
     ingest_google_place_documents,
@@ -148,13 +150,14 @@ def _refresh_place_knowledge(signals) -> dict:
 
     metrics: dict[str, object] = {"enabled": True, "places": len(place_ids)}
     try:
-        with psycopg.connect(database_url) as conn:
+        with psycopg.connect(database_url, row_factory=dict_row) as conn:
             metrics["evidence_documents"] = sync_existing_evidence_documents(conn, place_ids)
             if _place_knowledge_google_enabled():
                 metrics["google_documents"] = ingest_google_place_documents(conn, place_ids)
             if _place_knowledge_website_enabled():
                 metrics["website_documents"] = ingest_website_documents(conn, place_ids)
             metrics["restaurant_brief_documents"] = build_restaurant_brief_documents(conn, place_ids)
+            metrics["place_profiles_built"] = build_place_profiles_from_briefs(conn, place_ids)
             if _place_knowledge_embed_enabled():
                 metrics["embedded_documents"] = embed_place_documents(conn, place_ids)
     except Exception as exc:

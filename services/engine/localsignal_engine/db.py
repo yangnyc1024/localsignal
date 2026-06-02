@@ -1,7 +1,7 @@
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import psycopg
@@ -58,7 +58,7 @@ def finish_ingestion_run(
             """,
             (
                 status,
-                Jsonb(source_counts),
+                Jsonb(_clean_json(source_counts)),
                 live_mentions_written,
                 signals_generated,
                 report_id,
@@ -127,7 +127,7 @@ def record_social_source_run(
                 resolved_items,
                 review_items,
                 unresolved_items,
-                Jsonb(source_counts or {}),
+                Jsonb(_clean_json(source_counts or {})),
                 error,
             ),
         )
@@ -323,7 +323,7 @@ def write_raw_source_items_from_mentions(mentions: list[Mention]) -> tuple[int, 
                         _extract_food_keywords(mention.body),
                         mention.sentiment,
                         mention.occurred_at,
-                        Jsonb({"source": mention.source}),
+                        Jsonb(_clean_json({"source": mention.source})),
                     ),
                 )
                 if cur.fetchone():
@@ -397,13 +397,13 @@ def write_social_metadata_items(items: list[SocialMetadataItem]) -> tuple[int, i
                         _clean_text(item.text),
                         _extract_food_keywords(item.text),
                         item.occurred_at,
-                        Jsonb(
+                        Jsonb(_clean_json(
                             {
                                 "source": item.platform,
                                 "resolution_confidence": item.place_resolution_confidence,
                                 "engagement_metrics": item.engagement_metrics,
                             }
-                        ),
+                        )),
                     ),
                 )
                 if cur.fetchone():
@@ -553,9 +553,9 @@ def _upsert_raw_source_item(cur, mention: Mention):
                 mention.place_id,
                 _clean_text(mention.body),
                 mention.occurred_at,
-                Jsonb(mention.engagement_metrics or {}),
-                Jsonb(_geo_metadata_for_mention(mention)),
-                Jsonb({**(mention.raw_json or {}), "rating": mention.rating}),
+                Jsonb(_clean_json(mention.engagement_metrics or {})),
+                Jsonb(_clean_json(_geo_metadata_for_mention(mention))),
+                Jsonb(_clean_json({**(mention.raw_json or {}), "rating": mention.rating})),
             ),
         )
         row = cur.fetchone()
@@ -590,9 +590,9 @@ def _upsert_raw_source_item(cur, mention: Mention):
             mention.place_id,
             _clean_text(mention.body),
             mention.occurred_at,
-            Jsonb(mention.engagement_metrics or {}),
-            Jsonb(_geo_metadata_for_mention(mention)),
-            Jsonb({**(mention.raw_json or {}), "rating": mention.rating}),
+            Jsonb(_clean_json(mention.engagement_metrics or {})),
+            Jsonb(_clean_json(_geo_metadata_for_mention(mention))),
+            Jsonb(_clean_json({**(mention.raw_json or {}), "rating": mention.rating})),
             mention.source,
             mention.place_id,
             _clean_text(mention.body),
@@ -674,9 +674,9 @@ def _upsert_social_raw_source_item(cur, item: SocialMetadataItem):
                 item.place_id,
                 _clean_text(item.text),
                 item.occurred_at,
-                Jsonb(item.engagement_metrics),
-                Jsonb(item.geo_metadata),
-                Jsonb(item.raw_json),
+                Jsonb(_clean_json(item.engagement_metrics)),
+                Jsonb(_clean_json(item.geo_metadata)),
+                Jsonb(_clean_json(item.raw_json)),
                 item.place_resolution_confidence,
                 item.resolution_status,
             ),
@@ -714,9 +714,9 @@ def _upsert_social_raw_source_item(cur, item: SocialMetadataItem):
             item.place_id,
             _clean_text(item.text),
             item.occurred_at,
-            Jsonb(item.engagement_metrics),
-            Jsonb(item.geo_metadata),
-            Jsonb(item.raw_json),
+            Jsonb(_clean_json(item.engagement_metrics)),
+            Jsonb(_clean_json(item.geo_metadata)),
+            Jsonb(_clean_json(item.raw_json)),
             item.place_resolution_confidence,
             item.resolution_status,
             item.platform,
@@ -783,7 +783,18 @@ def _geo_metadata_for_mention(mention: Mention) -> dict:
 
 
 def _clean_text(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", str(text).replace("\x00", "")).strip()
+
+
+def _clean_json(value: Any) -> Any:
+    """Recursively strip NUL bytes from any JSON-serialisable value."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {k.replace("\x00", "") if isinstance(k, str) else k: _clean_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clean_json(item) for item in value]
+    return value
 
 
 def _extract_food_keywords(text: str) -> list[str]:
@@ -966,9 +977,9 @@ def write_signals(signals: list[Signal]) -> list[UUID]:
                         product["confidence_level"],
                         product["confidence_score"],
                         product["confidence_reason"],
-                        Jsonb(product["metrics"]),
+                        Jsonb(_clean_json(product["metrics"])),
                         product["time_window"],
-                        Jsonb(signal.evidence),
+                        Jsonb(_clean_json(signal.evidence)),
                         signal.score,
                         signal.place.city,
                         signal.week_start,
@@ -1070,9 +1081,9 @@ def write_weekly_report(signals: list[Signal], region: str = DEFAULT_REGION) -> 
                         product["confidence_level"],
                         product["confidence_score"],
                         product["confidence_reason"],
-                        Jsonb(product["metrics"]),
+                        Jsonb(_clean_json(product["metrics"])),
                         product["time_window"],
-                        Jsonb(signal.evidence),
+                        Jsonb(_clean_json(signal.evidence)),
                         signal.score,
                         signal.place.city,
                         signal.week_start,

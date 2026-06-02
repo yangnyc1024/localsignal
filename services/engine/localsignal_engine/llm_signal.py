@@ -9,11 +9,15 @@ from psycopg.types.json import Jsonb
 
 from localsignal_engine.place_knowledge import (
     ensure_place_knowledge_schema,
+    get_place_food_facts,
+    merge_place_profile,
     place_profile,
     retrieve_place_documents,
     sync_existing_evidence_documents,
     upsert_place_profile,
 )
+import re
+
 from localsignal_engine.llm_text import (
     BANNED_WORDS,
     LlmEnrichmentError,
@@ -61,15 +65,17 @@ def enrich_report_signals_with_llm(report_id: UUID) -> dict[str, Any]:
             evidence = _signal_evidence(conn, signal["id"])
             if len(evidence) < _min_evidence_count():
                 repaired = _apply_place_doc_profile_repair(conn, signal)
-                skipped.append({"signal_id": signal["id"], "reason": f"Only {len(evidence)} evidence item(s)."})
                 if repaired:
                     enriched += 1
+                else:
+                    skipped.append({"signal_id": signal["id"], "reason": f"Only {len(evidence)} evidence item(s)."})
                 continue
 
             try:
-                result = _generate_signal_json(_prompt(signal, evidence, _place_context(conn, signal, evidence)))
+                place_ctx = _place_context(conn, signal, evidence)
+                result = _generate_signal_json(_prompt(signal, evidence, place_ctx))
                 _validate_result(result, evidence)
-                _apply_result(conn, signal, result, evidence)
+                _apply_result(conn, signal, result, evidence, place_ctx)
                 enriched += 1
             except LlmEnrichmentError as exc:
                 _apply_fallback(conn, signal)
@@ -127,13 +133,36 @@ def _place_context(conn, signal: dict, evidence: list[dict]) -> dict[str, Any]:
     )
     query = f"{place.get('name')} {place.get('category')} menu food signature items flavor occasion {evidence_terms}"
     docs = retrieve_place_documents(conn, place["id"], query, limit=8)
+    food_facts = get_place_food_facts(conn, place["id"])
     return {
         "place_profile": place_profile(conn, place["id"]),
         "retrieved_place_documents": docs,
+        "food_facts": food_facts,
     }
 
 
+def _latin_place_name(name: str) -> str:
+    """Return the Latin/ASCII portion of a place name, stripping CJK characters."""
+    # Strip CJK (Korean, Chinese, Japanese) characters
+    latin = re.sub(r"[ᄀ-ᇿ㄰-㆏가-힯一-鿿぀-ヿ＀-￯]+", "", name)
+    # If result is wrapped in parens (e.g. "(Chungchoon Sikdang)"), unwrap
+    latin = re.sub(r"^\s*\(\s*(.*?)\s*\)\s*$", r"\1", latin.strip())
+    latin = re.sub(r"\s+", " ", latin).strip()
+    return latin or name
+
+
+def _safe_title(value: str, fallback: str) -> str:
+    """Clean LLM title output and reject garbled hex/encoding artifacts."""
+    cleaned = _clean_output(value, fallback)
+    # Reject if contains hex-like garbage (e.g. '0a8c0b0b3c8ae4cc2a4')
+    if re.search(r"\b[0-9a-fA-F]{8,}\b", cleaned):
+        return fallback
+    return cleaned
+
+
 def _prompt(signal: dict, evidence: list[dict], place_context: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    place = dict(signal["place"])
+    place["display_name"] = _latin_place_name(place.get("name") or "")
     return {
         "instructions": [
             "You generate calm analytical food signal interpretation for LocalSignal.",
@@ -144,14 +173,19 @@ def _prompt(signal: dict, evidence: list[dict], place_context: Optional[dict[str
             "The product is a food signal, not a restaurant recommendation.",
             "Write for a local resident deciding what changed nearby, not for a business owner or market analyst.",
             "Avoid business strategy language such as market dynamics, business reputation, consumer perception, or decision making.",
-            "The title must describe the food/local phenomenon first, not the restaurant first.",
+            "ALWAYS use place.display_name (not place.name) when writing human-readable text including titles, summaries, and descriptions. place.name may contain non-Latin characters.",
+            "phenomenon_title: write a specific food-focused description of what is happening. Do NOT copy or mirror the current_title pattern. Bad: 'X is getting more recent attention for Y'. Good: 'Katsu cutlets drawing repeat visits in Palisades Park' or 'Bingsu sentiment shifting at Cafe Miel'. Include a specific food item or behavior when evidence supports it. Keep under 12 words.",
             "Use the place as an anchor, not as the product. Avoid titles like '<place> has activity lift'.",
-            "Keep the title specific, calm, and under 12 words. Do not use the word detected.",
+            "Do not use the word detected.",
             "Explain what changed in concrete terms: mention pace, repeated dishes/food terms, wait/crowd/lateness behavior, source diversity, or confidence.",
             "Also produce reader framing fields: reader_hook, what_to_notice, skeptic_note, good_for, watch_out, best_read_as, place_anchor_reason, food_or_cuisine_type, evidence_receipt.",
             "Also produce place_profile and food_signal.",
-            "place_profile describes the durable place identity from official_description, menu, place profile, and other stable context.",
+            "place_context.food_facts contains verified dish and behavior facts extracted from restaurant briefs — treat these as high-confidence anchors when populating food_signal.signal_dish and place_profile.signature_items.",
+            "place_profile describes the durable place identity from official_description, menu, place profile, food_facts, and other stable context.",
+            "place_profile.food_types must contain short cuisine-category labels only (e.g. 'Korean BBQ', 'Cajun seafood', 'Italian', 'Dessert cafe'). Never put sentences, service descriptions, or primary_pull text into food_types.",
             "food_signal describes what food, flavor, or occasion is pulling the current signal.",
+            "food_signal.primary_pull must be a food item, dish category, or cuisine — never a service behavior, staff name, or atmosphere descriptor. If recent evidence is mostly about service, still name the place's known food anchor from place_context (e.g. 'Korean BBQ', 'bingsu', 'pancakes'). Service signals belong in food_signal.summary only.",
+            "food_signal.flavor_cue is required — write a 1-3 word taste or texture descriptor (e.g. 'crispy', 'spicy', 'grilled', 'rich broth', 'sweet and chewy'). If not explicit in evidence, infer from the cuisine type in place_context.",
             "Separate durable place identity from recent signal movement: if the place is known for crab but recent evidence is about service, say that clearly.",
             "If food-level evidence is thin, say so in food_signal.summary and lower food_signal.confidence.",
             "For food_signal.signal_dish: name the single most-mentioned specific dish or menu item found in evidence_chunks, using the exact name as it appears in reviews (e.g. 'Wang Tonkatsu', not just 'tonkatsu'). If no specific dish name appears in evidence, use empty string.",
@@ -165,7 +199,7 @@ def _prompt(signal: dict, evidence: list[dict], place_context: Optional[dict[str
             "Do not use percentages unless they are explicitly present in computed metrics.",
             "Output valid JSON only.",
         ],
-        "place": signal["place"],
+        "place": place,
         "candidate": {
             "id": signal["id"],
             "signal_type": signal["signal_type"],
@@ -178,7 +212,7 @@ def _prompt(signal: dict, evidence: list[dict], place_context: Optional[dict[str
             "confidence_score": signal.get("confidence_score"),
             "confidence_reason": signal.get("confidence_reason"),
         },
-        "place_context": place_context or {"place_profile": None, "retrieved_place_documents": []},
+        "place_context": place_context or {"place_profile": None, "retrieved_place_documents": [], "food_facts": []},
         "evidence_chunks": evidence,
         "json_schema": _json_schema(),
     }
@@ -339,9 +373,9 @@ def _validate_result(result: dict[str, Any], evidence: list[dict]) -> None:
         result["evidence_ids"] = [row["id"] for row in evidence[:3]]
 
 
-def _apply_result(conn, signal: dict, result: dict[str, Any], evidence: list[dict]) -> None:
+def _apply_result(conn, signal: dict, result: dict[str, Any], evidence: list[dict], place_context: Optional[dict[str, Any]] = None) -> None:
     evidence_ids = _valid_evidence_ids(result.get("evidence_ids") or [], evidence)
-    food_signal = _repair_food_signal(signal, result.get("food_signal") or {}, evidence)
+    food_signal = _repair_food_signal(signal, result.get("food_signal") or {}, evidence, place_context)
     place_profile_data = _repair_place_profile(signal, result.get("place_profile") or {}, food_signal, evidence)
     evidence_json = {
         **(signal.get("evidence") or {}),
@@ -358,7 +392,7 @@ def _apply_result(conn, signal: dict, result: dict[str, Any], evidence: list[dic
         "evidence_ids": evidence_ids,
     }
     if place_profile_data:
-        upsert_place_profile(conn, signal["place"]["id"], place_profile_data)
+        merge_place_profile(conn, signal["place"]["id"], place_profile_data)
     conn.execute(
         """
         UPDATE signals
@@ -374,7 +408,7 @@ def _apply_result(conn, signal: dict, result: dict[str, Any], evidence: list[dic
         WHERE id = %s
         """,
         (
-            _clean_output(result.get("phenomenon_title") or result["title"], fallback=signal["title"]),
+            _safe_title(result.get("phenomenon_title") or result["title"], fallback=signal["title"]),
             _clean_output(result["short_summary"], fallback=signal["summary"]),
             _clean_output(result["short_summary"], fallback=signal["summary"]),
             _clean_output(result["ai_summary"], fallback=signal["summary"]),
@@ -391,7 +425,9 @@ def _apply_place_doc_profile_repair(conn, signal: dict) -> bool:
     evidence_json = dict(signal.get("evidence") or {})
     query = f"{signal['place'].get('name')} menu food signature items flavor occasion"
     docs = retrieve_place_documents(conn, signal["place"]["id"], query, limit=8)
-    if not docs:
+    food_facts = get_place_food_facts(conn, signal["place"]["id"])
+    place_ctx = {"food_facts": food_facts, "retrieved_place_documents": docs}
+    if not docs and not food_facts:
         return False
     pseudo_evidence = [
         {
@@ -401,7 +437,7 @@ def _apply_place_doc_profile_repair(conn, signal: dict) -> bool:
         }
         for row in docs
     ]
-    food_signal = _repair_food_signal(signal, evidence_json.get("food_signal") or {}, pseudo_evidence)
+    food_signal = _repair_food_signal(signal, evidence_json.get("food_signal") or {}, pseudo_evidence, place_ctx)
     place_profile_data = _repair_place_profile(signal, evidence_json.get("place_profile") or {}, food_signal, pseudo_evidence)
     cleaned_evidence = {
         key: value
@@ -409,7 +445,7 @@ def _apply_place_doc_profile_repair(conn, signal: dict) -> bool:
         if key not in {"place_anchor_reason", "skeptic_note", "good_for", "watch_out", "best_read_as", "evidence_receipt"}
     }
     cleaned_evidence.update({"food_signal": food_signal, "place_profile": place_profile_data})
-    upsert_place_profile(conn, signal["place"]["id"], place_profile_data)
+    merge_place_profile(conn, signal["place"]["id"], place_profile_data)
     conn.execute(
         """
         UPDATE signals
@@ -534,22 +570,15 @@ def _valid_evidence_ids(values: list[str], evidence: list[dict]) -> list[str]:
     return valid or [row["id"] for row in evidence[:3]]
 
 
-def _repair_food_signal(signal: dict, food_signal: dict[str, Any], evidence: list[dict]) -> dict[str, Any]:
+def _repair_food_signal(signal: dict, food_signal: dict[str, Any], evidence: list[dict], place_context: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     repaired = dict(food_signal or {})
     primary = str(repaired.get("primary_pull") or "").strip()
     if primary and primary.lower() not in {"restaurant", "food", "local food", "place", "general food"}:
         return repaired
 
-    text = " ".join(
-        [
-            signal.get("place", {}).get("name") or "",
-            signal.get("place", {}).get("category") or "",
-            signal.get("title") or "",
-            signal.get("summary") or "",
-            " ".join(str(row.get("chunk_text") or "") for row in evidence[:8]),
-        ]
-    ).lower()
-    pull = _food_pull_from_text(text)
+    # Use persisted food facts as the repair source — LLM-extracted, no keyword matching
+    food_facts = (place_context or {}).get("food_facts") or []
+    pull = _food_pull_from_facts(food_facts)
     if not pull:
         return repaired
 
@@ -568,73 +597,47 @@ def _repair_food_signal(signal: dict, food_signal: dict[str, Any], evidence: lis
 
 
 def _repair_place_profile(signal: dict, profile: dict[str, Any], food_signal: dict[str, Any], evidence: list[dict]) -> dict[str, Any]:
+    """Sanitise the LLM-generated place_profile dict.
+
+    No rule-based keyword extraction — trust the LLM output and only fill in
+    missing fields from food_signal (which is itself LLM-generated).
+    """
     repaired = dict(profile or {})
-    place_name = str((signal.get("place") or {}).get("name") or "This place").strip()
-    place_short = _clean_place_name(place_name)
-    category = str((signal.get("place") or {}).get("category") or "local food").replace("_", " ").strip()
-    evidence_text = " ".join(str(row.get("chunk_text") or "") for row in evidence[:8])
-    text = " ".join(
-        [
-            place_name,
-            category,
-            signal.get("title") or "",
-            signal.get("summary") or "",
-            evidence_text,
-            " ".join(str(item) for item in (signal.get("evidence") or {}).get("keywords", []) or []),
-        ]
-    ).lower()
-    pull = _food_pull_from_text(text)
-    primary_pull = str(food_signal.get("primary_pull") or (pull or {}).get("primary_pull") or "").strip()
-    flavor = str(food_signal.get("flavor_cue") or (pull or {}).get("flavor_cue") or "").strip()
-    occasion = str(food_signal.get("occasion") or (pull or {}).get("occasion") or "").strip()
 
-    known_for = str(repaired.get("known_for") or "").strip()
-    if _weak_profile_text(known_for):
-        known_for = _known_for_from_context(place_short, primary_pull, flavor, text, category)
-    repaired["known_for"] = known_for
+    # Carry food_signal fields into profile where missing
+    primary_pull = str(food_signal.get("primary_pull") or "").strip()
+    flavor = str(food_signal.get("flavor_cue") or "").strip()
+    occasion = str(food_signal.get("occasion") or "").strip()
 
-    food_types = _profile_string_list(repaired.get("food_types"))
-    if _weak_profile_list(food_types):
-        food_types = [primary_pull or category.title()]
+    if not str(repaired.get("known_for") or "").strip():
+        place_name = _clean_place_name(str((signal.get("place") or {}).get("name") or "This place"))
+        repaired["known_for"] = f"{place_name} — profile pending next brief refresh." if not primary_pull else f"{place_name} is a {primary_pull} place."
+
+    # Only keep food_types that look like short cuisine labels, not sentences
+    food_types = [
+        t for t in _profile_string_list(repaired.get("food_types"))
+        if len(t) < 40 and "." not in t and len(t.split()) <= 4
+    ]
     repaired["food_types"] = _dedupe(food_types)
 
     signature_items = _profile_string_list(repaired.get("signature_items"))
-    signature_items = _dedupe(signature_items + _signature_items_from_context(text, primary_pull))
-    repaired["signature_items"] = signature_items[:5]
+    repaired["signature_items"] = _dedupe(signature_items)[:5]
 
     flavor_cues = _profile_string_list(repaired.get("flavor_cues"))
-    if flavor:
+    if flavor and flavor not in flavor_cues:
         flavor_cues.append(flavor)
-    flavor_cues.extend(_flavor_cues_from_context(text))
     repaired["flavor_cues"] = _dedupe(flavor_cues)[:4]
 
     occasions = _profile_string_list(repaired.get("occasions"))
-    if occasion:
+    if occasion and occasion not in occasions:
         occasions.append(occasion)
-    occasions.extend(_occasions_from_context(text))
     repaired["occasions"] = _dedupe(occasions)[:4]
 
     source_count = int(repaired.get("source_count") or 0)
     repaired["source_count"] = max(source_count, len([row for row in evidence if row.get("chunk_text")]) or 1)
-    repaired["caveats"] = str(repaired.get("caveats") or "").strip()
-    if _weak_profile_text(repaired["caveats"]):
+    if not str(repaired.get("caveats") or "").strip():
         repaired["caveats"] = "Profile is based on retrieved place context and current evidence; keep claims limited to those sources."
     return repaired
-
-
-def _weak_profile_text(value: str) -> bool:
-    text = _clean_place_name(str(value or "")).lower()
-    return (
-        not text
-        or "tracked as restaurant" in text
-        or "limited signal evidence" in text
-        or text in {"restaurant", "food", "local food"}
-    )
-
-
-def _weak_profile_list(values: list[str]) -> bool:
-    cleaned = [str(value).strip().lower() for value in values if str(value).strip()]
-    return not cleaned or all(value in {"restaurant", "food", "local food"} for value in cleaned)
 
 
 def _profile_string_list(value: Any) -> list[str]:
@@ -645,92 +648,23 @@ def _profile_string_list(value: Any) -> list[str]:
     return [str(value).strip()] if str(value).strip() else []
 
 
-def _known_for_from_context(place: str, primary_pull: str, flavor: str, text: str, category: str) -> str:
-    if "samhap" in text or "삼합" in text or "jumulleok" in text or "주물럭" in text or primary_pull.lower() == "korean bbq":
-        return f"{place} reads as a Korean grill spot with BBQ-style meats, shared table cooking, and Korean side dishes."
-    if primary_pull:
-        detail = f" with {flavor}" if flavor else ""
-        return f"{place} reads as a {primary_pull} place{detail}."
-    return f"{place} reads as a {category.lower()} place."
-
-
-def _signature_items_from_context(text: str, primary_pull: str) -> list[str]:
-    items: list[str] = []
-    if primary_pull:
-        items.append(primary_pull)
-    patterns = [
-        ("samhap", ["samhap", "sam hop", "samhop", "삼합"]),
-        ("jumulleok", ["jumulleok", "주물럭"]),
-        ("gopchang jjigae", ["gopchang", "곱창"]),
-        ("ojingeo-samgyeopsal", ["오삼", "ojingeo"]),
-        ("tteokbokki", ["떡볶이", "tteokbokki"]),
-        ("corn cheese", ["콘치즈", "corn cheese"]),
-        ("mussels", ["홍합", "mussel"]),
-    ]
-    for label, terms in patterns:
-        if any(term in text for term in terms):
-            items.append(label)
-    return items
-
-
-def _flavor_cues_from_context(text: str) -> list[str]:
-    cues: list[str] = []
-    if any(term in text for term in ["grill", "bbq", "고기", "구워", "삼겹"]):
-        cues.append("grilled meat")
-    if any(term in text for term in ["김치", "kimchi", "반찬", "banchan"]):
-        cues.append("kimchi / banchan")
-    if any(term in text for term in ["찌개", "jjigae", "stew"]):
-        cues.append("stew / jjigae")
-    return cues
-
-
-def _occasions_from_context(text: str) -> list[str]:
-    occasions: list[str] = []
-    if any(term in text for term in ["group", "회식", "모임", "friends", "family", "parents"]):
-        occasions.append("group dinner")
-    if any(term in text for term in ["alcohol", "soju", "drink", "술"]):
-        occasions.append("dinner with drinks")
-    return occasions
-
-
-def _food_pull_from_text(text: str) -> Optional[dict[str, str]]:
-    if any(term in text for term in ["seafood boil", "cajun", "crab", "shrimp", "clams"]):
-        return {
-            "primary_pull": "seafood boil",
-            "flavor_cue": "fresh seafood / sauce",
-            "occasion": "group dinner",
-            "image_query": "cajun seafood boil crab shrimp",
-            "image_alt": "Cajun seafood boil with crab and shrimp",
-            "basis": "Evidence mentions crab, shrimp, clams, fresh seafood, sauce, and shared trays.",
-        }
-    if any(term in text for term in ["doner", "döner", "kebab", "gyro", "shawarma"]):
-        return {
-            "primary_pull": "doner / kebab",
-            "flavor_cue": "grilled meat / street-food format",
-            "occasion": "quick meal",
-            "image_query": "doner kebab wrap",
-            "image_alt": "Doner kebab wrap",
-            "basis": "Place context points to doner and kebab-style food.",
-        }
-    if any(term in text for term in ["korean bbq", "bbq", "grill", "ayce", "삼합", "주물럭", "고기", "구워", "samhap", "samhop"]):
-        return {
-            "primary_pull": "Korean BBQ",
-            "flavor_cue": "grilled meat",
-            "occasion": "group dinner",
-            "image_query": "korean bbq grill",
-            "image_alt": "Korean BBQ grill",
-            "basis": "Place context points to Korean BBQ and grill language.",
-        }
-    if any(term in text for term in ["donkatsu", "tonkatsu", "pork cutlet"]):
-        return {
-            "primary_pull": "donkatsu",
-            "flavor_cue": "crispy cutlet",
-            "occasion": "casual meal",
-            "image_query": "donkatsu pork cutlet",
-            "image_alt": "Donkatsu pork cutlet",
-            "basis": "Place context points to donkatsu and cutlet language.",
-        }
-    return None
+def _food_pull_from_facts(facts: list[dict]) -> Optional[dict[str, str]]:
+    """Derive food pull from persisted place_food_facts (highest confidence dish first)."""
+    dishes = [f for f in facts if f.get("fact_type") == "dish" and f.get("confidence", 0) >= 0.6]
+    if not dishes:
+        return None
+    top = dishes[0]
+    dish = str(top.get("fact_value") or "").strip()
+    if not dish:
+        return None
+    return {
+        "primary_pull": dish,
+        "flavor_cue": "",
+        "occasion": "",
+        "image_query": dish.lower(),
+        "image_alt": dish,
+        "basis": f"Derived from persisted food fact (confidence {top.get('confidence', 0):.2f}).",
+    }
 
 
 def _min_evidence_count() -> int:
