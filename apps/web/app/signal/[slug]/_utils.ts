@@ -19,12 +19,21 @@ export function cleanText(value: string) {
     .trim();
 }
 
-export function shortPlaceName(value: string) {
-  return cleanText(value)
+export function shortPlaceName(value: string, maxLen = 40): string {
+  // Strip CJK characters (Korean, Chinese, Japanese)
+  let latin = value.replace(/[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\u4E00-\u9FFF\u3040-\u30FF\uFF00-\uFFEF]+/g, "").trim();
+  // Unwrap if parens wrap the entire remaining string e.g. "(Chungchoon Sikdang)"
+  latin = latin.replace(/^\s*\(\s*(.*?)\s*\)\s*$/, "$1").trim();
+  latin = latin.replace(/^[|/\-,\s]+|[|/\-,\s]+$/g, "").trim();
+  const cleaned = cleanText(latin || value)
     .replace(/\s*\|.*$/, "")
     .replace(/\s*-\s*Cajun Seafood.*$/i, "")
     .replace(/\s+Nj\b/gi, "")
     .trim();
+  if (cleaned.length <= maxLen) return cleaned;
+  const cutAt = cleaned.search(/ [-|/] /);
+  if (cutAt > 8 && cutAt <= maxLen) return cleaned.slice(0, cutAt).trim();
+  return cleaned.slice(0, maxLen).trimEnd() + "\u2026";
 }
 
 export function formatDateTime(value: string) {

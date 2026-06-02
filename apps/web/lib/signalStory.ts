@@ -1,5 +1,24 @@
 import type { Signal } from "@/lib/types";
 
+/**
+ * Return a display-friendly place name, stripping CJK characters and
+ * truncating overly long Google Places names.
+ */
+export function displayPlaceName(name: string, maxLen = 40): string {
+  // Extract Latin/ASCII portion (strip Korean, Chinese, Japanese characters)
+  let latin = name.replace(/[ᄀ-ᇿ㄰-㆏가-힯一-鿿぀-ヿ]+/g, "").trim();
+  // Unwrap if parens contain the whole remaining string
+  latin = latin.replace(/^\s*\(\s*(.*?)\s*\)\s*$/, "$1").trim();
+  // Remove trailing punctuation artifacts
+  latin = latin.replace(/^[|/\-,\s]+|[|/\-,\s]+$/g, "").trim();
+  const cleaned = latin || name;
+  if (cleaned.length <= maxLen) return cleaned;
+  // Truncate at a word boundary, strip descriptor after " - " or " | "
+  const cutAt = cleaned.search(/ [-|/] /);
+  if (cutAt > 8 && cutAt <= maxLen) return cleaned.slice(0, cutAt).trim();
+  return cleaned.slice(0, maxLen).trimEnd() + "…";
+}
+
 const fillerWords = new Set([
   "food",
   "place",
@@ -48,10 +67,11 @@ export function cuisineType(signal: Signal) {
 
 export function placeArea(signal: Signal) {
   const neighborhood = signal.place.neighborhood?.trim();
-  if (neighborhood && neighborhood !== signal.city) {
-    return `${neighborhood}, ${signal.city}`;
+  const city = signal.city?.trim();
+  if (neighborhood && city && neighborhood !== city) {
+    return `${neighborhood}, ${city}`;
   }
-  return signal.city;
+  return neighborhood || city || "";
 }
 
 export function placeIdentity(signal: Signal) {

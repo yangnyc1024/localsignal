@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import urllib.parse
 import urllib.error
 import urllib.request
@@ -10,6 +11,26 @@ from typing import Optional
 from uuid import UUID
 
 import psycopg
+
+
+def _display_place_name(name: str, max_len: int = 40) -> str:
+    """Return a clean, Latin-only, truncated place name for display."""
+    # Strip CJK characters
+    latin = re.sub(r"[가-힯ᄀ-ᇿ㄰-㆏一-鿿぀-ヿ＀-￯]+", "", name).strip()
+    # Unwrap if parens wrap the whole remaining string
+    latin = re.sub(r"^\s*\(\s*(.*?)\s*\)\s*$", r"\1", latin).strip()
+    # Strip leading/trailing punctuation artifacts
+    latin = re.sub(r"^[|/\-,\s]+|[|/\-,\s]+$", "", latin).strip()
+    cleaned = re.sub(r"\s*\|.*$", "", (latin or name)).strip()
+    cleaned = re.sub(r"\s*-\s*Cajun Seafood.*$", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"\s+Nj\b", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if len(cleaned) <= max_len:
+        return cleaned
+    m = re.search(r" [-|/] ", cleaned)
+    if m and 8 < m.start() <= max_len:
+        return cleaned[: m.start()].strip()
+    return cleaned[:max_len].rstrip() + "…"
 
 
 @dataclass(frozen=True)
@@ -31,6 +52,9 @@ class ReportSignal:
     evidence: dict
     confidence_level: Optional[str]
     momentum_driver: Optional[str]
+    slug: Optional[str] = None
+    food_signal: Optional[dict] = None
+    place_profile: Optional[dict] = None
 
 
 @dataclass(frozen=True)
@@ -98,7 +122,10 @@ def _latest_report(conn) -> Report:
           s.signal_type,
           s.evidence,
           s.confidence_level,
-          COALESCE(s.short_summary, s.summary) AS momentum_driver
+          COALESCE(s.short_summary, s.summary) AS momentum_driver,
+          s.slug,
+          s.evidence->'food_signal' AS food_signal,
+          s.evidence->'place_profile' AS place_profile
         FROM report_signals rs
         JOIN signals s ON s.id = rs.signal_id
         JOIN places p ON p.id = s.place_id
@@ -128,6 +155,9 @@ def _latest_report(conn) -> Report:
                 evidence=signal[8] or {},
                 confidence_level=signal[9],
                 momentum_driver=signal[10],
+                slug=signal[11],
+                food_signal=signal[12] if isinstance(signal[12], dict) else None,
+                place_profile=signal[13] if isinstance(signal[13], dict) else None,
             )
             for signal in signal_rows
         ],
@@ -353,29 +383,76 @@ def _has_briefing(report: Report) -> bool:
 
 def _render_briefing_html(report: Report) -> str:
     briefing = report.briefing
-    places = "\n".join(
-        f"""
+    web_base = os.getenv("WEB_BASE_URL", "http://localhost:3000")
+
+    # Build slug lookup from signals
+    slug_by_name: dict[str, str] = {}
+    food_by_name: dict[str, dict] = {}
+    known_for_by_name: dict[str, str] = {}
+    for sig in report.signals:
+        if sig.slug:
+            slug_by_name[sig.place_name] = sig.slug
+        if sig.food_signal and sig.food_signal.get("primary_pull"):
+            food_by_name[sig.place_name] = sig.food_signal
+        if sig.place_profile and sig.place_profile.get("known_for"):
+            known_for_by_name[sig.place_name] = sig.place_profile["known_for"]
+
+    def _place_row(place: dict) -> str:
+        name = _display_place_name(str(place.get("name") or ""))
+        area = str(place.get("area") or "")
+        reason = str(place.get("reason") or "")
+        slug = slug_by_name.get(name)
+        fs = food_by_name.get(name, {})
+        pull = str(fs.get("primary_pull") or "").strip()
+        flavor = str(fs.get("flavor_cue") or "").strip()
+        known_for = known_for_by_name.get(name, "")
+        detail_url = f"{web_base}/signal/{slug}" if slug else web_base
+
+        food_pill = ""
+        if pull:
+            food_pill = f"""<div style="margin-top:8px;display:inline-block;padding:4px 10px;border-radius:20px;background:#eef3ef;font-size:12px;line-height:18px;font-weight:700;color:#4f6b5d;">
+              🍽 {escape(pull)}{(' · ' + escape(flavor)) if flavor else ''}
+            </div>"""
+
+        known_for_line = ""
+        if known_for:
+            # Truncate to keep email concise
+            short = known_for[:120] + ("…" if len(known_for) > 120 else "")
+            known_for_line = f"""<div style="margin-top:6px;font-size:13px;line-height:19px;color:rgba(22,32,29,0.58);font-style:italic;">{escape(short)}</div>"""
+
+        return f"""
         <tr>
-          <td style="padding:13px 14px 13px 0;border-top:1px solid #e5dccf;vertical-align:top;">
-            <div style="font-size:15px;line-height:21px;font-weight:700;color:#16201d;">{escape(str(place.get("name") or ""))}</div>
-            <div style="margin-top:3px;font-size:13px;line-height:19px;color:rgba(22,32,29,0.58);">{escape(str(place.get("area") or ""))}</div>
+          <td style="padding:14px 14px 14px 0;border-top:1px solid #e5dccf;vertical-align:top;width:44%;">
+            <a href="{escape(detail_url)}" style="font-size:15px;line-height:21px;font-weight:700;color:#16201d;text-decoration:none;">{escape(name)}</a>
+            <div style="margin-top:2px;font-size:12px;line-height:18px;color:rgba(22,32,29,0.50);">{escape(area)}</div>
+            {food_pill}
+            {known_for_line}
           </td>
-          <td style="padding:13px 0;border-top:1px solid #e5dccf;vertical-align:top;font-size:14px;line-height:22px;color:rgba(22,32,29,0.72);">
-            {escape(str(place.get("reason") or ""))}
+          <td style="padding:14px 0;border-top:1px solid #e5dccf;vertical-align:top;font-size:14px;line-height:22px;color:rgba(22,32,29,0.72);">
+            {escape(reason)}
+            {"<br><a href='" + escape(detail_url) + "' style='display:inline-block;margin-top:10px;font-size:13px;font-weight:700;color:#4f6b5d;text-decoration:none;'>Read signal →</a>" if slug else ""}
           </td>
         </tr>
         """
-        for place in (briefing.get("places_involved") or [])[:3]
-    )
-    reads = "\n".join(
-        f"""
+
+    def _read_card(read: dict) -> str:
+        title = str(read.get("title") or "")
+        summary = str(read.get("summary") or "")
+        slug = str(read.get("signal_slug") or "")
+        detail_url = f"{web_base}/signal/{slug}" if slug else web_base
+        return f"""
         <article style="margin:0 0 12px 0;padding:18px;border:1px solid #ddd4c6;border-radius:8px;background:rgba(255,255,255,0.9);">
-          <h2 style="margin:0;font-size:19px;line-height:25px;font-weight:700;color:#16201d;">{escape(str(read.get("title") or ""))}</h2>
-          <p style="margin:8px 0 0 0;font-size:14px;line-height:22px;color:rgba(22,32,29,0.70);">{escape(str(read.get("summary") or ""))}</p>
+          <h2 style="margin:0;font-size:17px;line-height:24px;font-weight:700;color:#16201d;">
+            {"<a href='" + escape(detail_url) + "' style='color:#16201d;text-decoration:none;'>" + escape(title) + "</a>" if slug else escape(title)}
+          </h2>
+          <p style="margin:8px 0 0 0;font-size:14px;line-height:22px;color:rgba(22,32,29,0.70);">{escape(summary)}</p>
+          {"<a href='" + escape(detail_url) + "' style='display:inline-block;margin-top:10px;font-size:13px;font-weight:700;color:#4f6b5d;text-decoration:none;'>Read signal →</a>" if slug else ""}
         </article>
         """
-        for read in (briefing.get("supporting_reads") or [])[:3]
-    )
+
+    places_html = "\n".join(_place_row(p) for p in (briefing.get("places_involved") or [])[:4])
+    reads_html = "\n".join(_read_card(r) for r in (briefing.get("supporting_reads") or [])[:3])
+
     return f"""
     <!doctype html>
     <html>
@@ -389,21 +466,27 @@ def _render_briefing_html(report: Report) -> str:
               <div style="display:inline-block;padding:7px 11px;border:1px solid #ddd4c6;border-radius:6px;background:rgba(255,255,255,0.82);font-size:14px;line-height:18px;font-weight:700;color:#4f6b5d;">
                 LocalSignal
               </div>
-              <h1 style="max-width:640px;margin:16px 0 0 0;font-size:40px;line-height:45px;font-weight:700;color:#16201d;">{escape(str(briefing.get("title") or report.title))}</h1>
+              <h1 style="max-width:640px;margin:16px 0 0 0;font-size:38px;line-height:44px;font-weight:700;color:#16201d;">{escape(str(briefing.get("title") or report.title))}</h1>
               <p style="max-width:610px;margin:15px 0 0 0;font-size:17px;line-height:27px;color:rgba(22,32,29,0.75);">{escape(str(briefing.get("subtitle") or report.intro))}</p>
               <p style="max-width:610px;margin:16px 0 0 0;padding-left:14px;border-left:2px solid #4f6b5d;font-size:15px;line-height:24px;color:rgba(22,32,29,0.72);">{escape(str(briefing.get("why_it_matters") or ""))}</p>
               <div style="margin-top:18px;font-size:14px;line-height:20px;color:rgba(22,32,29,0.60);">Week of {escape(report.week_start)} · {escape(report.region)}</div>
             </header>
+
             <section style="padding-top:22px;">
               <h2 style="margin:0 0 8px 0;font-size:18px;line-height:24px;font-weight:700;color:#16201d;">Places involved</h2>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-                {places}
+                {places_html}
               </table>
             </section>
-            <section style="padding-top:22px;">
+
+            <section style="padding-top:28px;">
               <h2 style="margin:0 0 12px 0;font-size:18px;line-height:24px;font-weight:700;color:#16201d;">Also worth noting</h2>
-              {reads}
+              {reads_html}
             </section>
+
+            <footer style="margin-top:32px;padding-top:20px;border-top:1px solid #ddd4c6;font-size:13px;line-height:20px;color:rgba(22,32,29,0.50);">
+              <a href="{escape(web_base)}" style="color:#4f6b5d;font-weight:700;text-decoration:none;">View full report online →</a>
+            </footer>
           </div>
         </main>
       </body>
