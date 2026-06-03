@@ -11,7 +11,7 @@ from typing import Optional
 from uuid import UUID
 
 import psycopg
-from localsignal_engine.db.connection import get_conn
+from localsignal_engine.database.connection import get_conn
 
 
 def _display_place_name(name: str, max_len: int = 40) -> str:

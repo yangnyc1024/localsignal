@@ -9,6 +9,7 @@ from .schema import ensure_place_knowledge_schema
 
 DOCUMENT_MIN_CHARS = 80
 EMBEDDING_MODEL = "text-embedding-3-small"
+RESTAURANT_BRIEF_SOURCE = "localsignal_restaurant_brief"
 
 
 def _clean_text(value: str) -> str:

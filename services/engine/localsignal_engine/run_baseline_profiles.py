@@ -1,7 +1,7 @@
 import os
 
 import psycopg
-from localsignal_engine.db.connection import get_conn
+from localsignal_engine.database.connection import get_conn
 
 from localsignal_engine.baseline import compute_baseline_profiles
 from localsignal_engine.db import load_places

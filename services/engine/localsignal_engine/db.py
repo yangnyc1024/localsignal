@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 
 from localsignal_engine.ingestion.social_metadata import SocialMetadataItem
 from localsignal_engine.models import Mention, Place, Signal
-from localsignal_engine.db.connection import get_conn
+from localsignal_engine.database.connection import get_conn
 from localsignal_engine.signal.story import (
     confidence_from_evidence,
     product_fields,
