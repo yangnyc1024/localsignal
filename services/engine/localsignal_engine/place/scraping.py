@@ -104,6 +104,25 @@ def _google_profile_content(result: dict) -> str:
     return _clean_text(" | ".join(part for part in parts if part))
 
 
+# Third-party ordering / menu platforms that cannot be scraped for useful content.
+_THIRD_PARTY_MENU_DOMAINS = {
+    "toasttab.com", "square.site", "squareup.com", "grubhub.com",
+    "doordash.com", "ubereats.com", "chownow.com", "olo.com",
+    "bentobox.com", "owner.com", "popmenu.com", "order.online",
+    "allset.com", "slice.com", "opentable.com", "resy.com",
+    "restaurantji.com", "menupages.com",
+}
+
+
+def _is_third_party_menu_url(url: str) -> bool:
+    """Return True if the URL belongs to a known third-party ordering/menu platform."""
+    try:
+        host = urllib.parse.urlparse(url).netloc.lower().lstrip("www.")
+    except Exception:
+        return False
+    return any(host == d or host.endswith("." + d) for d in _THIRD_PARTY_MENU_DOMAINS)
+
+
 def _website_candidate_urls(url: str) -> list:
     root = url.rstrip("/")
     candidates = [root]
@@ -286,12 +305,43 @@ def ingest_website_documents(conn, place_ids: Optional[list] = None) -> int:
     written = 0
     for row in rows:
         for url in _website_candidate_urls(row["website"]):
+            # Detect third-party menu platforms — skip scraping, record link instead.
+            if _is_third_party_menu_url(url):
+                if upsert_place_document(
+                    conn,
+                    place_id=row["place_id"],
+                    source="website",
+                    source_url=url,
+                    title=f"Menu link for {row['name']}",
+                    content=f"Menu is hosted on a third-party platform: {url}",
+                    content_type="menu_external_link",
+                    metadata={"website_root": row["website"], "third_party": True},
+                ):
+                    written += 1
+                continue
+
             page = _fetch_webpage(url)
             if not page:
                 continue
             title, text = page
+
+            # Also detect if the fetched page redirected to a third-party platform.
+            if _is_third_party_menu_url(url):
+                if upsert_place_document(
+                    conn,
+                    place_id=row["place_id"],
+                    source="website",
+                    source_url=url,
+                    title=f"Menu link for {row['name']}",
+                    content=f"Menu is hosted on a third-party platform: {url}",
+                    content_type="menu_external_link",
+                    metadata={"website_root": row["website"], "third_party": True},
+                ):
+                    written += 1
+                continue
+
             content_type = _website_content_type(url)
-            metadata = {"website_root": row["website"]}
+            metadata: dict[str, Any] = {"website_root": row["website"]}
             if content_type == "official_description":
                 metadata.update(
                     {
