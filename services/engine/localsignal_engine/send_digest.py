@@ -1,5 +1,5 @@
 import logging
-from localsignal_engine.email import send_latest_digest
+from localsignal_engine.email.send import send_latest_digest
 
 logger = logging.getLogger(__name__)
 

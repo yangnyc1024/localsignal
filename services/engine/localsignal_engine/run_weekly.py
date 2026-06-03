@@ -17,12 +17,12 @@ from localsignal_engine.db import (
     write_social_metadata_items,
     write_weekly_report,
 )
-from localsignal_engine.email import send_latest_digest
+from localsignal_engine.email.send import send_latest_digest
 from localsignal_engine.ingestion.live import fetch_live_mentions, fetch_social_metadata_items
-from localsignal_engine.llm import enrich_report_signals_with_llm
-from localsignal_engine.ml_engine import generate_report_signals
+from localsignal_engine.signal.enrichment import enrich_report_signals_with_llm
+from localsignal_engine.signal.scoring import generate_report_signals
 from localsignal_engine.logging_config import configure_logging
-from localsignal_engine.place_knowledge import (
+from localsignal_engine.place import (
     build_place_profiles_from_briefs,
     build_restaurant_brief_documents,
     embed_place_documents,

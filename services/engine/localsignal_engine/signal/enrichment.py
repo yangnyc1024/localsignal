@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from localsignal_engine.place_knowledge import (
+from localsignal_engine.place import (
     ensure_place_knowledge_schema,
     get_place_food_facts,
     merge_place_profile,
