@@ -9,7 +9,7 @@ from localsignal_engine.db.connection import get_dict_conn
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from localsignal_engine.llm_text import (
+from localsignal_engine.llm import (
     BRIEFING_BANNED_WORDS,
     BRIEFING_SIGNALISH_PATTERNS,
     LlmEnrichmentError,

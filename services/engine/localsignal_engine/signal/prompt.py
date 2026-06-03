@@ -1,7 +1,7 @@
 import re
 from typing import Any, Optional
 
-from localsignal_engine.llm_text import _clean_output
+from localsignal_engine.llm import _clean_output
 
 
 def _latin_place_name(name: str) -> str:

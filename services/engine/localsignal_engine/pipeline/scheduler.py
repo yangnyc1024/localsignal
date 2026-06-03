@@ -4,8 +4,8 @@ import time
 from datetime import datetime, timezone
 
 from localsignal_engine.logging_config import configure_logging
-from localsignal_engine.run_evidence_ingestion import main as run_evidence_ingestion
-from localsignal_engine.run_weekly import run_once as run_weekly_cycle
+from localsignal_engine.pipeline.evidence import main as run_evidence_ingestion
+from localsignal_engine.pipeline.weekly import run_once as run_weekly_cycle
 
 logger = logging.getLogger(__name__)
 

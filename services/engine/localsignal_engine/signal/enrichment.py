@@ -21,7 +21,7 @@ from localsignal_engine.place import (
     sync_existing_evidence_documents,
     upsert_place_profile,
 )
-from localsignal_engine.llm_text import (
+from localsignal_engine.llm import (
     BANNED_WORDS,
     LlmEnrichmentError,
     _clean_json_value,
@@ -30,7 +30,7 @@ from localsignal_engine.llm_text import (
     _sanitize_banned_words,
     openai_responses_call,
 )
-from localsignal_engine.llm_briefing import (
+from localsignal_engine.signal.briefing import (
     _generate_report_briefing,
     _report_signals,
     generate_report_briefing,

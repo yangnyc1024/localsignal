@@ -1,7 +1,7 @@
 import os
 from typing import Any, Optional
 
-from localsignal_engine.llm_text import _clean_place_name, _dedupe
+from localsignal_engine.llm import _clean_place_name, _dedupe
 
 
 def _min_evidence_count() -> int:

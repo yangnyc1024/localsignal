@@ -81,7 +81,7 @@ services:
   scheduler:
     build:
       context: ./services/engine
-    command: ["python", "-m", "localsignal_engine.scheduler"]
+    command: ["python", "-m", "localsignal_engine.pipeline.scheduler"]
     volumes:
       - ./data/social:/data/social:ro
     environment:
