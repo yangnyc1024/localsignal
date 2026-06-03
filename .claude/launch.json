@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "localsignal-web",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "logs", "-f", "web"],
+      "port": 3000,
+      "autoPort": false
+    }
+  ]
+}
