@@ -26,6 +26,7 @@ from localsignal_engine.place_knowledge import (
     build_place_profiles_from_briefs,
     build_restaurant_brief_documents,
     embed_place_documents,
+    ingest_apify_google_reviews,
     ingest_google_place_documents,
     ingest_website_documents,
     sync_existing_evidence_documents,
@@ -134,6 +135,10 @@ def _place_knowledge_weekly_enabled() -> bool:
     return os.getenv("PLACE_KNOWLEDGE_WEEKLY_ENABLED", "true").lower() == "true"
 
 
+def _place_knowledge_apify_reviews_enabled() -> bool:
+    return bool(os.getenv("APIFY_TOKEN")) and os.getenv("PLACE_KNOWLEDGE_APIFY_REVIEWS_ENABLED", "true").lower() == "true"
+
+
 def _place_knowledge_google_enabled() -> bool:
     return os.getenv("PLACE_KNOWLEDGE_GOOGLE_ENABLED", "true").lower() == "true"
 
@@ -160,6 +165,8 @@ def _refresh_place_knowledge(signals) -> dict:
             metrics["evidence_documents"] = sync_existing_evidence_documents(conn, place_ids)
             if _place_knowledge_google_enabled():
                 metrics["google_documents"] = ingest_google_place_documents(conn, place_ids)
+            if _place_knowledge_apify_reviews_enabled():
+                metrics["apify_review_documents"] = ingest_apify_google_reviews(conn, place_ids)
             if _place_knowledge_website_enabled():
                 metrics["website_documents"] = ingest_website_documents(conn, place_ids)
             metrics["restaurant_brief_documents"] = build_restaurant_brief_documents(conn, place_ids)

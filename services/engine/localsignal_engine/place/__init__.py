@@ -19,6 +19,7 @@ from .documents import (
 from .scraping import (
     ingest_google_place_documents,
     ingest_website_documents,
+    ingest_apify_google_reviews,
     _google_place_details,
     _google_profile_content,
     _fetch_json,
@@ -69,6 +70,7 @@ __all__ = [
     "retrieve_place_documents",
     "ingest_google_place_documents",
     "ingest_website_documents",
+    "ingest_apify_google_reviews",
     "build_restaurant_brief_documents",
     "build_place_profiles_from_briefs",
     "extract_place_food_facts_from_brief",

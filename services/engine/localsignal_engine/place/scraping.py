@@ -312,3 +312,57 @@ def ingest_website_documents(conn, place_ids: Optional[list] = None) -> int:
             ):
                 written += 1
     return written
+
+
+def ingest_apify_google_reviews(conn, place_ids: Optional[list] = None) -> int:
+    """Fetch full Google Maps reviews via Apify and store as place_documents.
+
+    This supplements ingest_google_place_documents() which is limited to
+    5 reviews by the Places API. Requires APIFY_TOKEN env var.
+    """
+    from localsignal_engine.ingestion.apify_google_reviews import fetch_google_reviews
+
+    ensure_place_knowledge_schema(conn)
+    rows = _places(conn, place_ids)
+    if not rows:
+        return 0
+
+    from localsignal_engine.models import Place
+    places = [
+        Place(
+            id=row["id"],
+            name=row["name"],
+            category=row.get("category", "food"),
+            city=row.get("city", ""),
+            neighborhood=row.get("neighborhood"),
+            google_place_id=row.get("google_place_id"),
+        )
+        for row in rows
+        if row.get("google_place_id")
+    ]
+    if not places:
+        return 0
+
+    records = fetch_google_reviews(places)
+    written = 0
+    for record in records:
+        text = _clean_text(record.get("text") or "")
+        if len(text) < 30:
+            continue
+        if upsert_place_document(
+            conn,
+            place_id=record["place_id"],
+            source="google_reviews_apify",
+            source_url=record.get("review_url") or "",
+            title="Google review (Apify)",
+            content=text,
+            content_type="review",
+            occurred_at=record.get("published_at"),
+            metadata={
+                "rating": record.get("rating"),
+                "author_name": record.get("author_name"),
+                "source": "apify_google_maps_reviews",
+            },
+        ):
+            written += 1
+    return written

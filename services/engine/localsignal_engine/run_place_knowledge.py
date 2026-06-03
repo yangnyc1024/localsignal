@@ -12,6 +12,7 @@ from localsignal_engine.place_knowledge import (
     embed_place_documents,
     ensure_place_knowledge_schema,
     extract_place_food_facts_from_brief,
+    ingest_apify_google_reviews,
     ingest_google_place_documents,
     ingest_website_documents,
     sync_existing_evidence_documents,
@@ -24,6 +25,7 @@ def main() -> None:
     parser.add_argument("--place-id", action="append", dest="place_ids", help="Limit work to one place id. Can be repeated.")
     parser.add_argument("--sync-evidence", action="store_true", help="Copy existing evidence chunks into place_documents.")
     parser.add_argument("--google", action="store_true", help="Fetch Google Places details and reviews into place_documents.")
+    parser.add_argument("--apify-reviews", action="store_true", help="Fetch full Google Maps reviews via Apify (requires APIFY_TOKEN).")
     parser.add_argument("--website", action="store_true", help="Fetch website/menu pages discovered from Google Places metadata.")
     parser.add_argument("--restaurant-brief", action="store_true", help="Generate LLM restaurant brief documents using web search and official context.")
     parser.add_argument("--embed", action="store_true", help="Embed missing place_documents.")
@@ -42,6 +44,8 @@ def main() -> None:
             metrics["evidence_documents"] = sync_existing_evidence_documents(conn, args.place_ids)
         if args.google:
             metrics["google_documents"] = ingest_google_place_documents(conn, args.place_ids)
+        if args.apify_reviews:
+            metrics["apify_review_documents"] = ingest_apify_google_reviews(conn, args.place_ids)
         if args.website:
             metrics["website_documents"] = ingest_website_documents(conn, args.place_ids)
         if args.restaurant_brief:
