@@ -1,6 +1,7 @@
 import os
 
 import psycopg
+from localsignal_engine.db.connection import get_conn
 
 from localsignal_engine.baseline import compute_baseline_profiles
 from localsignal_engine.db import load_places
@@ -12,7 +13,7 @@ def main() -> None:
         raise RuntimeError("DATABASE_URL is required to compute baseline profiles.")
 
     places = load_places()
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         updated = compute_baseline_profiles(conn, places)
     print(f"Updated {updated} baseline profile(s).")
 

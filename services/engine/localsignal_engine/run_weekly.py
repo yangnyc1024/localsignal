@@ -1,6 +1,7 @@
 import os
 
 import psycopg
+from localsignal_engine.db.connection import get_conn, get_dict_conn
 from psycopg.rows import dict_row
 
 from localsignal_engine.baseline import compute_baseline_profiles
@@ -150,7 +151,7 @@ def _refresh_place_knowledge(signals) -> dict:
 
     metrics: dict[str, object] = {"enabled": True, "places": len(place_ids)}
     try:
-        with psycopg.connect(database_url, row_factory=dict_row) as conn:
+        with get_dict_conn() as conn:
             metrics["evidence_documents"] = sync_existing_evidence_documents(conn, place_ids)
             if _place_knowledge_google_enabled():
                 metrics["google_documents"] = ingest_google_place_documents(conn, place_ids)
@@ -169,7 +170,7 @@ def _compute_baselines(places) -> int:
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         return 0
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         return compute_baseline_profiles(conn, places)
 
 

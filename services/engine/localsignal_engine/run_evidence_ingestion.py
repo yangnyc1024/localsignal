@@ -8,6 +8,7 @@ from localsignal_engine.db import (
 from localsignal_engine.baseline import compute_baseline_profiles
 import os
 import psycopg
+from localsignal_engine.db.connection import get_conn
 from localsignal_engine.ingestion.live import fetch_live_mentions, fetch_social_metadata_items
 
 
@@ -25,7 +26,7 @@ def main() -> None:
     database_url = os.getenv("DATABASE_URL")
     baseline_count = 0
     if database_url:
-        with psycopg.connect(database_url) as conn:
+        with get_conn() as conn:
             baseline_count = compute_baseline_profiles(conn, places)
     print(
         "Fetched "

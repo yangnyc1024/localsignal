@@ -8,6 +8,7 @@ from psycopg.types.json import Jsonb
 
 from localsignal_engine.ingestion.social_metadata import SocialMetadataItem
 from localsignal_engine.models import Mention, Place, Signal
+from localsignal_engine.db.connection import get_conn
 from localsignal_engine.signal.story import (
     confidence_from_evidence,
     product_fields,
@@ -19,10 +20,7 @@ DEFAULT_REGION = "Fort Lee / Edgewater / Palisades Park"
 
 
 def start_ingestion_run() -> UUID:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to start ingestion run.")
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         row = conn.execute(
             """
             INSERT INTO ingestion_runs (status)
@@ -43,10 +41,7 @@ def finish_ingestion_run(
     report_id: Optional[UUID] = None,
     error: Optional[str] = None,
 ) -> None:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to finish ingestion run.")
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         conn.execute(
             """
             UPDATE ingestion_runs
@@ -91,10 +86,9 @@ def record_social_source_run(
     source_counts: Optional[dict[str, int]] = None,
     error: Optional[str] = None,
 ) -> None:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
+    if not __import__('os').getenv('DATABASE_URL'):
         return
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         _ensure_social_source_runs_table(conn)
         conn.execute(
             """
@@ -168,11 +162,7 @@ def _ensure_social_source_runs_table(conn) -> None:
 
 
 def load_places() -> list[Place]:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to load places.")
-
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         rows = conn.execute(
             """
             SELECT id::text, name, category, city, neighborhood, latitude, longitude, google_place_id, map_url
@@ -197,14 +187,11 @@ def load_places() -> list[Place]:
 
 
 def upsert_places_from_discovery(places: list[dict]) -> int:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to upsert discovered places.")
     if not places:
         return 0
 
     written = 0
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_places_google_place_id ON places(google_place_id) WHERE google_place_id IS NOT NULL"
@@ -255,14 +242,11 @@ def upsert_places_from_discovery(places: list[dict]) -> int:
 
 
 def write_mentions(mentions: list[Mention]) -> int:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to write mentions.")
     if not mentions:
         return 0
 
     written = 0
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             for mention in mentions:
                 if _insert_mention(cur, mention):
@@ -272,15 +256,12 @@ def write_mentions(mentions: list[Mention]) -> int:
 
 
 def write_raw_source_items_from_mentions(mentions: list[Mention]) -> tuple[int, int]:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to write raw source items.")
     if not mentions:
         return 0, 0
 
     raw_written = 0
     chunks_written = 0
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             for mention in mentions:
                 raw_id = _upsert_raw_source_item(cur, mention)
@@ -337,9 +318,6 @@ def write_raw_source_items_from_mentions(mentions: list[Mention]) -> tuple[int, 
 
 
 def write_social_metadata_items(items: list[SocialMetadataItem]) -> tuple[int, int, int, int, int]:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to write social metadata items.")
     if not items:
         return 0, 0, 0, 0, 0
 
@@ -348,7 +326,7 @@ def write_social_metadata_items(items: list[SocialMetadataItem]) -> tuple[int, i
     chunks_written = 0
     review_count = 0
     unresolved_count = 0
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             for item in items:
                 raw_id = _upsert_social_raw_source_item(cur, item)
@@ -417,12 +395,9 @@ def write_social_metadata_items(items: list[SocialMetadataItem]) -> tuple[int, i
 
 
 def link_evidence_chunks_to_signals(limit_per_signal: int = 10) -> int:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to link evidence chunks.")
 
     linked = 0
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         rows = conn.execute(
             """
             SELECT
@@ -490,12 +465,9 @@ def link_evidence_chunks_to_signals(limit_per_signal: int = 10) -> int:
 
 
 def load_recent_mentions(days: int = 35) -> list[Mention]:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to load mentions.")
 
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         rows = conn.execute(
             """
             SELECT
@@ -915,12 +887,8 @@ def _generic_review_terms() -> set[str]:
 
 
 def write_signals(signals: list[Signal]) -> list[UUID]:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to write signals.")
-
     signal_ids: list[UUID] = []
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             for signal in signals:
                 product = product_fields(signal)
@@ -995,14 +963,11 @@ def write_signals(signals: list[Signal]) -> list[UUID]:
 
 
 def write_weekly_report(signals: list[Signal], region: str = DEFAULT_REGION) -> UUID:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required to write a weekly report.")
     if not signals:
         raise RuntimeError("No signals available for report generation.")
 
     week_start = signals[0].week_start
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS briefing JSONB NOT NULL DEFAULT '{}'::jsonb")
             cur.execute(

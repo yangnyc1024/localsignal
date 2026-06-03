@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg
+from localsignal_engine.db.connection import get_conn
 
 from localsignal_engine.ingestion.apify_social import fetch_apify_social_metadata_items
 from localsignal_engine.ingestion.base import IngestionAdapter
@@ -104,7 +105,7 @@ def _source_due(provider: str, interval_seconds: int) -> bool:
     if not database_url:
         return True
     try:
-        with psycopg.connect(database_url) as conn:
+        with get_conn() as conn:
             row = conn.execute(
                 """
                 SELECT finished_at

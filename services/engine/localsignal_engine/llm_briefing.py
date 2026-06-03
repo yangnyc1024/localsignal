@@ -5,6 +5,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 import psycopg
+from localsignal_engine.db.connection import get_dict_conn
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
@@ -26,7 +27,7 @@ def generate_report_briefing(report_id: UUID, use_llm: Optional[bool] = None) ->
         raise RuntimeError("DATABASE_URL is required for briefing generation.")
 
     should_use_llm = bool(os.getenv("OPENAI_API_KEY")) if use_llm is None else use_llm
-    with psycopg.connect(database_url, row_factory=dict_row) as conn:
+    with get_dict_conn() as conn:
         metrics = _generate_report_briefing(conn, report_id, use_llm=should_use_llm)
         conn.commit()
         return metrics

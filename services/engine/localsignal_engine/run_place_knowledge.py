@@ -2,6 +2,7 @@ import argparse
 import os
 
 import psycopg
+from localsignal_engine.db.connection import get_dict_conn
 from psycopg.rows import dict_row
 
 from localsignal_engine.place_knowledge import (
@@ -32,7 +33,7 @@ def main() -> None:
     if not database_url:
         raise RuntimeError("DATABASE_URL is required.")
 
-    with psycopg.connect(database_url, row_factory=dict_row) as conn:
+    with get_dict_conn() as conn:
         ensure_place_knowledge_schema(conn)
         metrics = {"schema": "ok"}
         if args.sync_evidence:

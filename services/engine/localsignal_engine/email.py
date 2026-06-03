@@ -11,6 +11,7 @@ from typing import Optional
 from uuid import UUID
 
 import psycopg
+from localsignal_engine.db.connection import get_conn
 
 
 def _display_place_name(name: str, max_len: int = 40) -> str:
@@ -73,7 +74,7 @@ def send_latest_digest() -> int:
     if not database_url:
         raise RuntimeError("DATABASE_URL is required to send digests.")
 
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         report = _latest_report(conn)
         subscribers = _active_subscribers(conn)
         sent_count = 0

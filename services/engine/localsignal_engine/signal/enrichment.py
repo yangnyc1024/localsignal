@@ -4,6 +4,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 import psycopg
+from localsignal_engine.db.connection import get_dict_conn
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
@@ -58,7 +59,7 @@ def enrich_report_signals_with_llm(report_id: UUID) -> dict[str, Any]:
     skipped: list = []
     failed: list = []
 
-    with psycopg.connect(database_url, row_factory=dict_row) as conn:
+    with get_dict_conn() as conn:
         signals = _report_signals(conn, report_id)
         ensure_place_knowledge_schema(conn)
         for signal in signals:
