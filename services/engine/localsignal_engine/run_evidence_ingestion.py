@@ -10,7 +10,7 @@ from localsignal_engine.db import (
 from localsignal_engine.baseline import compute_baseline_profiles
 import os
 import psycopg
-from localsignal_engine.database.connection import get_conn
+from localsignal_engine.db.connection import get_conn
 from localsignal_engine.ingestion.live import fetch_live_mentions, fetch_social_metadata_items
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,7 @@ from psycopg.types.json import Jsonb
 
 from localsignal_engine.ingestion.social_metadata import SocialMetadataItem
 from localsignal_engine.models import Mention
-from localsignal_engine.database.connection import get_conn
+from localsignal_engine.db.connection import get_conn
 
 
 def start_ingestion_run() -> UUID:

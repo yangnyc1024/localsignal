@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg
-from localsignal_engine.database.connection import get_conn
+from localsignal_engine.db.connection import get_conn
 
 from localsignal_engine.ingestion.apify_social import fetch_apify_social_metadata_items
 from localsignal_engine.ingestion.base import IngestionAdapter

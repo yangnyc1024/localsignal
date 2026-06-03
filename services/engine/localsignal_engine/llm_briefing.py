@@ -5,7 +5,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 import psycopg
-from localsignal_engine.database.connection import get_dict_conn
+from localsignal_engine.db.connection import get_dict_conn
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 

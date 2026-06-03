@@ -2,7 +2,7 @@ import logging
 import os
 
 import psycopg
-from localsignal_engine.database.connection import get_conn, get_dict_conn
+from localsignal_engine.db.connection import get_conn, get_dict_conn
 from psycopg.rows import dict_row
 
 from localsignal_engine.baseline import compute_baseline_profiles

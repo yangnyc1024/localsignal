@@ -3,7 +3,7 @@ import argparse
 import os
 
 import psycopg
-from localsignal_engine.database.connection import get_dict_conn
+from localsignal_engine.db.connection import get_dict_conn
 from psycopg.rows import dict_row
 
 from localsignal_engine.place_knowledge import (

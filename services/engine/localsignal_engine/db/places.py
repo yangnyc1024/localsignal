@@ -1,5 +1,5 @@
 from localsignal_engine.models import Place
-from localsignal_engine.database.connection import get_conn
+from localsignal_engine.db.connection import get_conn
 
 
 def load_places() -> list:

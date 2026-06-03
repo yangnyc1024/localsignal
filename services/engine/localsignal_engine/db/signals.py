@@ -4,7 +4,7 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 
 from localsignal_engine.models import Signal
-from localsignal_engine.database.connection import get_conn
+from localsignal_engine.db.connection import get_conn
 from localsignal_engine.signal.story import product_fields
 from localsignal_engine.db.ingestion import _clean_json
 

@@ -4,7 +4,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from localsignal_engine.database.connection import get_conn
+from localsignal_engine.db.connection import get_conn
 
 from .models import Report
 from .models import ReportSignal
