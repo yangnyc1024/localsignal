@@ -1,3 +1,5 @@
+import logging
+from localsignal_engine.logging_config import configure_logging
 from localsignal_engine.db import (
     link_evidence_chunks_to_signals,
     load_places,
@@ -11,8 +13,11 @@ import psycopg
 from localsignal_engine.database.connection import get_conn
 from localsignal_engine.ingestion.live import fetch_live_mentions, fetch_social_metadata_items
 
+logger = logging.getLogger(__name__)
+
 
 def main() -> None:
+    configure_logging()
     places = load_places()
     social_items, social_source_counts = fetch_social_metadata_items(places)
     social_raw_count, social_mention_count, social_chunk_count, social_review_count, social_unresolved_count = (
@@ -28,15 +33,17 @@ def main() -> None:
     if database_url:
         with get_conn() as conn:
             baseline_count = compute_baseline_profiles(conn, places)
-    print(
-        "Fetched "
-        f"{len(mentions)} mentions from {source_counts}; "
-        f"stored {mention_count} new mentions, {raw_count} raw source items, "
-        f"{chunk_count} evidence chunks, {linked_count} signal-evidence links, "
-        f"imported {social_raw_count} social raw items, {social_mention_count} social mentions, "
-        f"{social_chunk_count} social evidence chunks, {social_review_count} social review items, "
-        f"{social_unresolved_count} unresolved social items, "
-        f"and updated {baseline_count} baseline profiles."
+    logger.info(
+        "Fetched %d mentions from %s; stored %d new mentions, %d raw source items, "
+        "%d evidence chunks, %d signal-evidence links, "
+        "imported %d social raw items, %d social mentions, "
+        "%d social evidence chunks, %d social review items, "
+        "%d unresolved social items, and updated %d baseline profiles.",
+        len(mentions), source_counts, mention_count, raw_count,
+        chunk_count, linked_count,
+        social_raw_count, social_mention_count,
+        social_chunk_count, social_review_count,
+        social_unresolved_count, baseline_count,
     )
 
 

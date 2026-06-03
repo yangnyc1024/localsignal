@@ -1,3 +1,4 @@
+import logging
 import json
 import os
 import time
@@ -9,6 +10,8 @@ from datetime import datetime, timezone
 
 from localsignal_engine.ingestion.base import IngestionAdapter
 from localsignal_engine.models import Mention, Place
+
+logger = logging.getLogger(__name__)
 
 
 class RedditAdapter(IngestionAdapter):
@@ -29,10 +32,9 @@ class RedditAdapter(IngestionAdapter):
                 break
             for place, query_text in _place_queries(places):
                 if query_count >= self.max_queries:
-                    print(
-                        f"Reddit fetch stopped after {query_count} querie(s); "
-                        "set REDDIT_MAX_QUERIES to raise the cap.",
-                        flush=True,
+                    logger.info(
+                        "Reddit fetch stopped after %d querie(s); set REDDIT_MAX_QUERIES to raise the cap.",
+                        query_count,
                     )
                     _record_reddit_run(status="succeeded", total_queries=query_count, parsed_items=len(mentions))
                     return mentions
@@ -46,10 +48,9 @@ class RedditAdapter(IngestionAdapter):
                     payload = _fetch_json(url)
                 except urllib.error.HTTPError as exc:
                     if exc.code == 429:
-                        print(
-                            f"Reddit rate limited r/{subreddit}; stopping Reddit fetch "
-                            f"for this run after {query_count} querie(s).",
-                            flush=True,
+                        logger.warning(
+                            "Reddit rate limited r/%s; stopping after %d querie(s).",
+                            subreddit, query_count,
                         )
                         _record_reddit_run(
                             status="failed",
@@ -59,10 +60,10 @@ class RedditAdapter(IngestionAdapter):
                         )
                         rate_limited = True
                         break
-                    print(f"Reddit fetch failed for r/{subreddit} {query_text}: HTTP {exc.code}", flush=True)
+                    logger.warning(f"Reddit fetch failed for r/{subreddit} {query_text}: HTTP {exc.code}")
                     continue
                 except OSError as exc:
-                    print(f"Reddit fetch failed for r/{subreddit} {query_text}: {exc}", flush=True)
+                    logger.warning(f"Reddit fetch failed for r/{subreddit} {query_text}: {exc}")
                     continue
 
                 for child in payload.get("data", {}).get("children", []):
@@ -98,7 +99,6 @@ class RedditAdapter(IngestionAdapter):
 def _record_reddit_run(status: str, total_queries: int, parsed_items: int, error: Optional[str] = None) -> None:
     try:
         from localsignal_engine.db import record_social_source_run
-
         record_social_source_run(
             provider="reddit",
             platform="reddit",
@@ -113,7 +113,7 @@ def _record_reddit_run(status: str, total_queries: int, parsed_items: int, error
             error=error,
         )
     except Exception as exc:
-        print(f"reddit source run logging failed: {exc}", flush=True)
+        logger.warning(f"reddit source run logging failed: {exc}")
 
 
 def _place_queries(places: list[Place]) -> list[tuple[Place, str]]:

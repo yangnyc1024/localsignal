@@ -1,3 +1,4 @@
+import logging
 import argparse
 import os
 
@@ -16,6 +17,7 @@ from localsignal_engine.place_knowledge import (
     sync_existing_evidence_documents,
 )
 
+logger = logging.getLogger(__name__)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build LocalSignal place knowledge documents.")
@@ -67,7 +69,7 @@ def main() -> None:
             metrics["food_facts_extracted"] = total_facts
         conn.commit()
 
-    print(metrics, flush=True)
+    logger.info(metric)
 
 
 if __name__ == "__main__":

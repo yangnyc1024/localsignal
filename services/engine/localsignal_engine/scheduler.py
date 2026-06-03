@@ -1,24 +1,27 @@
+import logging
 import os
 import time
 from datetime import datetime, timezone
 
+from localsignal_engine.logging_config import configure_logging
 from localsignal_engine.run_evidence_ingestion import main as run_evidence_ingestion
 from localsignal_engine.run_weekly import run_once as run_weekly_cycle
 
+logger = logging.getLogger(__name__)
+
 
 def main() -> None:
+    configure_logging()
     daily_enabled = _enabled("DAILY_EVIDENCE_ENABLED", default=True)
     weekly_enabled = _enabled("WEEKLY_REPORT_ENABLED", default=False)
     daily_interval = int(os.getenv("DAILY_EVIDENCE_INTERVAL_SECONDS", "86400"))
     weekly_interval = int(os.getenv("WEEKLY_INTERVAL_SECONDS", "604800"))
     run_on_start = _enabled("SCHEDULER_RUN_ON_START", default=True)
 
-    print(
-        "LocalSignal scheduler started. "
-        f"daily_enabled={daily_enabled} daily_interval={daily_interval} "
-        f"weekly_enabled={weekly_enabled} weekly_interval={weekly_interval} "
-        f"run_on_start={run_on_start}",
-        flush=True,
+    logger.info(
+        "LocalSignal scheduler started. daily_enabled=%s interval=%s "
+        "weekly_enabled=%s interval=%s run_on_start=%s",
+        daily_enabled, daily_interval, weekly_enabled, weekly_interval, run_on_start,
     )
 
     last_daily = 0.0
@@ -44,13 +47,13 @@ def main() -> None:
 
 def _run(label: str, fn) -> None:
     started_at = datetime.now(timezone.utc).isoformat()
-    print(f"Starting {label} at {started_at}", flush=True)
+    logger.info(f"Starting {label} at {started_at}")
     try:
         fn()
     except Exception as exc:
-        print(f"{label} failed: {exc}", flush=True)
+        logger.warning(f"{label} failed: {exc}")
         return
-    print(f"{label} completed.", flush=True)
+    logger.info(f"{label} completed.")
 
 
 def _enabled(name: str, default: bool) -> bool:

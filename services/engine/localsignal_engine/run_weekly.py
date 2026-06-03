@@ -1,3 +1,4 @@
+import logging
 import os
 
 import psycopg
@@ -20,6 +21,7 @@ from localsignal_engine.email import send_latest_digest
 from localsignal_engine.ingestion.live import fetch_live_mentions, fetch_social_metadata_items
 from localsignal_engine.llm import enrich_report_signals_with_llm
 from localsignal_engine.ml_engine import generate_report_signals
+from localsignal_engine.logging_config import configure_logging
 from localsignal_engine.place_knowledge import (
     build_place_profiles_from_briefs,
     build_restaurant_brief_documents,
@@ -28,6 +30,8 @@ from localsignal_engine.place_knowledge import (
     ingest_website_documents,
     sync_existing_evidence_documents,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def run_once() -> None:
@@ -83,14 +87,15 @@ def run_once() -> None:
             signals_generated=signals_generated,
             report_id=report_id,
         )
-        print(
-            f"Wrote report {report_id}, stored {written_count} live mentions, {raw_count} raw source items, "
-            f"{chunk_count} evidence chunks, imported {social_raw_count} social raw items, "
-            f"{social_mentions_count} social mentions, {social_chunk_count} social evidence chunks, "
-            f"{social_review_count} social review items, {social_unresolved_count} unresolved social items, "
-            f"linked {linked_count} evidence rows, updated {baseline_count} baselines, "
-            f"place knowledge {place_knowledge_metrics}, LLM enrichment {llm_metrics}, "
-            f"and queued {delivery_count} digest deliveries."
+        logger.info(
+            "Wrote report %s: %d live mentions, %d raw items, %d chunks, "
+            "%d social raw, %d social mentions, %d social chunks, "
+            "%d review items, %d unresolved, %d evidence links, "
+            "%d baselines updated; place_knowledge=%s llm=%s deliveries=%d",
+            report_id, written_count, raw_count, chunk_count,
+            social_raw_count, social_mentions_count, social_chunk_count,
+            social_review_count, social_unresolved_count, linked_count,
+            baseline_count, place_knowledge_metrics, llm_metrics, delivery_count,
         )
     except Exception as exc:
         finish_ingestion_run(
@@ -175,6 +180,7 @@ def _compute_baselines(places) -> int:
 
 
 def main() -> None:
+    configure_logging()
     run_once()
 
 

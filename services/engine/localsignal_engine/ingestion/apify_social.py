@@ -1,3 +1,4 @@
+import logging
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -8,6 +9,8 @@ from urllib.request import Request, urlopen
 from localsignal_engine.ingestion.social_metadata import SocialMetadataItem, parse_social_metadata_records
 from localsignal_engine.models import Place
 from localsignal_engine.db import record_social_source_run
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_apify_social_metadata_items(places: list[Place]) -> tuple[list[SocialMetadataItem], dict[str, int]]:
@@ -24,7 +27,7 @@ def fetch_apify_social_metadata_items(places: list[Place]) -> tuple[list[SocialM
         try:
             records = _fetch_dataset_items(dataset_id, token, max_items)
         except Exception as exc:
-            print(f"apify dataset {dataset_id} failed: {exc}", flush=True)
+            logger.warning(f"apify dataset {dataset_id} failed: {exc}")
             _record_apify_run(dataset_id=dataset_id, status="failed", error=str(exc))
             continue
         normalized_records = [
@@ -53,10 +56,9 @@ def fetch_apify_social_metadata_items(places: list[Place]) -> tuple[list[SocialM
             unresolved_items=unresolved_count,
             source_counts=dataset_source_counts,
         )
-        print(
-            f"apify dataset {dataset_id} produced {len(items)} social raw item(s) "
-            f"after dropping {old_count} old item(s).",
-            flush=True,
+        logger.info(
+            "apify dataset %s produced %d social raw item(s) after dropping %d old item(s).",
+            dataset_id, len(items), old_count,
         )
         all_items.extend(items)
         for source, count in dataset_source_counts.items():
@@ -230,4 +232,4 @@ def _record_apify_run(**kwargs: Any) -> None:
     try:
         record_social_source_run(provider="apify", **kwargs)
     except Exception as exc:
-        print(f"apify source run logging failed: {exc}", flush=True)
+        logger.warning(f"apify source run logging failed: {exc}")
