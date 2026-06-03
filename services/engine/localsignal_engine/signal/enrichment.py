@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 from uuid import UUID
 
@@ -63,37 +64,66 @@ def enrich_report_signals_with_llm(report_id: UUID) -> dict[str, Any]:
     skipped: list = []
     failed: list = []
 
+    max_workers = int(os.getenv("LLM_ENRICH_MAX_WORKERS", "4"))
+
     with get_dict_conn() as conn:
         signals = _report_signals(conn, report_id)
         ensure_place_knowledge_schema(conn)
-        for signal in signals:
-            signal_id = signal["id"]
-            place_name = (signal.get("place") or {}).get("name", signal_id)
-            try:
-                outcome = _enrich_one_signal(conn, signal)
-            except Exception as exc:
-                logger.warning(
-                    "Unexpected error enriching signal %s (%s); skipping. %s",
-                    signal_id, place_name, exc, exc_info=True,
-                )
-                failed.append({"signal_id": signal_id, "reason": f"Unexpected: {exc}"})
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                continue
 
-            if outcome["status"] == "enriched":
-                enriched += 1
-            elif outcome["status"] == "skipped":
-                skipped.append({"signal_id": signal_id, "reason": outcome["reason"]})
-            elif outcome["status"] == "failed":
-                failed.append({"signal_id": signal_id, "reason": outcome["reason"]})
+    # Each worker opens its own connection — psycopg connections are not thread-safe.
+    outcomes: list[dict[str, str]] = _enrich_signals_concurrent(signals, max_workers)
 
+    for outcome in outcomes:
+        if outcome["status"] == "enriched":
+            enriched += 1
+        elif outcome["status"] == "skipped":
+            skipped.append({"signal_id": outcome["signal_id"], "reason": outcome["reason"]})
+        elif outcome["status"] == "failed":
+            failed.append({"signal_id": outcome["signal_id"], "reason": outcome["reason"]})
+
+    with get_dict_conn() as conn:
         briefing_metrics = _generate_report_briefing(conn, report_id)
         conn.commit()
 
     return {"enabled": True, "enriched": enriched, "skipped": skipped, "failed": failed, "briefing": briefing_metrics}
+
+
+def _enrich_signals_concurrent(signals: list[dict], max_workers: int) -> list[dict[str, str]]:
+    """Run _enrich_one_signal() for each signal in a thread pool.
+
+    Each thread opens its own DB connection. Results are collected in
+    submission order. Unexpected exceptions are caught per-signal.
+    """
+    if not signals:
+        return []
+
+    def _task(signal: dict) -> dict[str, str]:
+        signal_id = signal["id"]
+        place_name = (signal.get("place") or {}).get("name", signal_id)
+        try:
+            with get_dict_conn() as conn:
+                outcome = _enrich_one_signal(conn, signal)
+                conn.commit()
+            return {**outcome, "signal_id": signal_id}
+        except Exception as exc:
+            logger.warning(
+                "Unexpected error enriching signal %s (%s): %s",
+                signal_id, place_name, exc, exc_info=True,
+            )
+            return {"status": "failed", "signal_id": signal_id, "reason": f"Unexpected: {exc}"}
+
+    results: list[dict[str, str]] = [{}] * len(signals)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_to_idx = {pool.submit(_task, sig): i for i, sig in enumerate(signals)}
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                results[idx] = future.result()
+            except Exception as exc:
+                signal_id = signals[idx]["id"]
+                logger.warning("Future for signal %s raised: %s", signal_id, exc)
+                results[idx] = {"status": "failed", "signal_id": signal_id, "reason": str(exc)}
+    return results
 
 
 def _enrich_one_signal(conn, signal: dict) -> dict[str, str]:

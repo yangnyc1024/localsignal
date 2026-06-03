@@ -9,9 +9,10 @@ or any run_*.py entry point).  All other modules just do:
 import logging
 import os
 import sys
+from typing import Optional
 
 
-def configure_logging(level: str | None = None) -> None:
+def configure_logging(level: Optional[str] = None) -> None:
     """Configure root logger with a structured text format.
 
     Level precedence: argument > LOG_LEVEL env var > INFO.
