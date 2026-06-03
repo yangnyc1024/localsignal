@@ -54,14 +54,22 @@ def enrich_report_signals_with_llm(report_id: UUID) -> dict[str, Any]:
 
     with psycopg.connect(database_url, row_factory=dict_row) as conn:
         signals = _report_signals(conn, report_id)
+        ensure_place_knowledge_schema(conn)
         for signal in signals:
+            sync_existing_evidence_documents(conn, [signal["place"]["id"]], limit=200)
+
             reason = _gate_reason(signal)
             if reason:
-                skipped.append({"signal_id": signal["id"], "reason": reason})
+                # Before hard-skipping, attempt a place-doc profile repair so thin-evidence
+                # signals still get food_signal / place_profile populated from place_documents
+                # and place_food_facts rather than being silently dropped.
+                repaired = _apply_place_doc_profile_repair(conn, signal)
+                if repaired:
+                    enriched += 1
+                else:
+                    skipped.append({"signal_id": signal["id"], "reason": reason})
                 continue
 
-            ensure_place_knowledge_schema(conn)
-            sync_existing_evidence_documents(conn, [signal["place"]["id"]], limit=200)
             evidence = _signal_evidence(conn, signal["id"])
             if len(evidence) < _min_evidence_count():
                 repaired = _apply_place_doc_profile_repair(conn, signal)
