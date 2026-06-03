@@ -1,9 +1,13 @@
 import json
+import logging
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from .schema import ensure_place_knowledge_schema
 from .documents import RESTAURANT_BRIEF_SOURCE, upsert_place_document, _clean_text
@@ -265,41 +269,65 @@ def _upsert_profile_from_brief(conn, place: dict, brief_metadata: dict) -> None:
 
 
 def build_restaurant_brief_documents(conn, place_ids: Optional[list] = None) -> int:
+    """Generate restaurant briefs concurrently, write results serially.
+
+    LLM + web_search calls (the slow part) run in a thread pool.
+    All DB writes happen in the calling thread using the provided conn.
+    Concurrency controlled by PLACE_KNOWLEDGE_BRIEF_MAX_WORKERS (default 4).
+    """
     ensure_place_knowledge_schema(conn)
     if not os.getenv("OPENAI_API_KEY"):
         return 0
+
+    places = [p for p in _places(conn, place_ids) if not _brief_is_fresh(conn, p["id"])]
+    if not places:
+        return 0
+
+    max_workers = int(os.getenv("PLACE_KNOWLEDGE_BRIEF_MAX_WORKERS", "4"))
+
+    def _generate_one(place: dict) -> Optional[tuple[dict, dict, dict]]:
+        """Return (place, brief, context) or None on failure. Runs in worker thread."""
+        try:
+            context = _restaurant_brief_context(conn, place["id"])
+            brief = _generate_restaurant_brief(place, context)
+            if brief:
+                return place, brief, context
+        except Exception as exc:
+            logger.warning("Brief generation failed for %s: %s", place.get("name"), exc)
+        return None
+
     written = 0
-    for place in _places(conn, place_ids):
-        if _brief_is_fresh(conn, place["id"]):
-            continue
-        context = _restaurant_brief_context(conn, place["id"])
-        brief = _generate_restaurant_brief(place, context)
-        if not brief:
-            continue
-        content = _restaurant_brief_content(place, brief)
-        full_metadata = {
-            **brief,
-            "source_type": "llm_generated_context",
-            "trust_level": "context_only",
-            "source_documents": {
-                "official": len(context["official_documents"]),
-                "menu": len(context["menu_documents"]),
-            },
-        }
-        if upsert_place_document(
-            conn,
-            place_id=place["id"],
-            source=RESTAURANT_BRIEF_SOURCE,
-            source_url=f"localsignal://restaurant-brief/{place['id']}",
-            title=f"Restaurant brief for {place['name']}",
-            content=content,
-            content_type="restaurant_brief",
-            metadata=full_metadata,
-        ):
-            written += 1
-            extract_place_food_facts_from_brief(conn, place["id"], brief)
-            # Build/merge place_profile immediately from the new brief
-            _upsert_profile_from_brief(conn, place, full_metadata)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_generate_one, place): place for place in places}
+        for future in as_completed(futures):
+            result = future.result()
+            if not result:
+                continue
+            place, brief, context = result
+            content = _restaurant_brief_content(place, brief)
+            full_metadata = {
+                **brief,
+                "source_type": "llm_generated_context",
+                "trust_level": "context_only",
+                "source_documents": {
+                    "official": len(context["official_documents"]),
+                    "menu": len(context["menu_documents"]),
+                },
+            }
+            if upsert_place_document(
+                conn,
+                place_id=place["id"],
+                source=RESTAURANT_BRIEF_SOURCE,
+                source_url=f"localsignal://restaurant-brief/{place['id']}",
+                title=f"Restaurant brief for {place['name']}",
+                content=content,
+                content_type="restaurant_brief",
+                metadata=full_metadata,
+            ):
+                written += 1
+                logger.info("Brief written for %s.", place.get("name"))
+                extract_place_food_facts_from_brief(conn, place["id"], brief)
+                _upsert_profile_from_brief(conn, place, full_metadata)
     return written
 
 
