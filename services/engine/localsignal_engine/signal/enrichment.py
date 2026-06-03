@@ -1,10 +1,13 @@
 import json
+import logging
 import os
 from typing import Any, Optional
 from uuid import UUID
 
 import psycopg
 from localsignal_engine.database.connection import get_dict_conn
+
+logger = logging.getLogger(__name__)
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
@@ -64,39 +67,79 @@ def enrich_report_signals_with_llm(report_id: UUID) -> dict[str, Any]:
         signals = _report_signals(conn, report_id)
         ensure_place_knowledge_schema(conn)
         for signal in signals:
-            sync_existing_evidence_documents(conn, [signal["place"]["id"]], limit=200)
-
-            reason = _gate_reason(signal)
-            if reason:
-                repaired = _apply_place_doc_profile_repair(conn, signal)
-                if repaired:
-                    enriched += 1
-                else:
-                    skipped.append({"signal_id": signal["id"], "reason": reason})
-                continue
-
-            evidence = _signal_evidence(conn, signal["id"])
-            if len(evidence) < _min_evidence_count():
-                repaired = _apply_place_doc_profile_repair(conn, signal)
-                if repaired:
-                    enriched += 1
-                else:
-                    skipped.append({"signal_id": signal["id"], "reason": f"Only {len(evidence)} evidence item(s)."})
-                continue
-
+            signal_id = signal["id"]
+            place_name = (signal.get("place") or {}).get("name", signal_id)
             try:
-                place_ctx = _place_context(conn, signal, evidence)
-                result = _generate_signal_json(_prompt(signal, evidence, place_ctx))
-                _validate_result(result, evidence)
-                _apply_result(conn, signal, result, evidence, place_ctx)
+                outcome = _enrich_one_signal(conn, signal)
+            except Exception as exc:
+                logger.warning(
+                    "Unexpected error enriching signal %s (%s); skipping. %s",
+                    signal_id, place_name, exc, exc_info=True,
+                )
+                failed.append({"signal_id": signal_id, "reason": f"Unexpected: {exc}"})
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                continue
+
+            if outcome["status"] == "enriched":
                 enriched += 1
-            except LlmEnrichmentError as exc:
-                _apply_fallback(conn, signal)
-                failed.append({"signal_id": signal["id"], "reason": str(exc)})
+            elif outcome["status"] == "skipped":
+                skipped.append({"signal_id": signal_id, "reason": outcome["reason"]})
+            elif outcome["status"] == "failed":
+                failed.append({"signal_id": signal_id, "reason": outcome["reason"]})
+
         briefing_metrics = _generate_report_briefing(conn, report_id)
         conn.commit()
 
     return {"enabled": True, "enriched": enriched, "skipped": skipped, "failed": failed, "briefing": briefing_metrics}
+
+
+def _enrich_one_signal(conn, signal: dict) -> dict[str, str]:
+    """Process a single signal. Returns {"status": "enriched"|"skipped"|"failed", "reason": str}.
+
+    All exceptions propagate to the caller, which handles isolation.
+    """
+    signal_id = signal["id"]
+
+    sync_existing_evidence_documents(conn, [signal["place"]["id"]], limit=200)
+
+    reason = _gate_reason(signal)
+    if reason:
+        try:
+            repaired = _apply_place_doc_profile_repair(conn, signal)
+        except Exception as exc:
+            logger.warning("place_doc repair failed for %s: %s", signal_id, exc)
+            repaired = False
+        if repaired:
+            logger.info("Signal %s: thin evidence repaired via place_docs.", signal_id)
+            return {"status": "enriched", "reason": ""}
+        return {"status": "skipped", "reason": reason}
+
+    evidence = _signal_evidence(conn, signal_id)
+    if len(evidence) < _min_evidence_count():
+        try:
+            repaired = _apply_place_doc_profile_repair(conn, signal)
+        except Exception as exc:
+            logger.warning("place_doc repair failed for %s: %s", signal_id, exc)
+            repaired = False
+        if repaired:
+            logger.info("Signal %s: low evidence repaired via place_docs.", signal_id)
+            return {"status": "enriched", "reason": ""}
+        return {"status": "skipped", "reason": f"Only {len(evidence)} evidence item(s)."}
+
+    try:
+        place_ctx = _place_context(conn, signal, evidence)
+        result = _generate_signal_json(_prompt(signal, evidence, place_ctx))
+        _validate_result(result, evidence)
+        _apply_result(conn, signal, result, evidence, place_ctx)
+        logger.info("Signal %s: LLM enrichment OK.", signal_id)
+        return {"status": "enriched", "reason": ""}
+    except LlmEnrichmentError as exc:
+        logger.warning("Signal %s: LLM enrichment failed: %s", signal_id, exc)
+        _apply_fallback(conn, signal)
+        return {"status": "failed", "reason": str(exc)}
 
 
 def _signal_evidence(conn, signal_id: str) -> list:
