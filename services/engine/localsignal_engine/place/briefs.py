@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -179,14 +180,33 @@ def _generate_restaurant_brief(place: dict, context: dict) -> Optional[dict]:
         },
     }
     model = os.getenv("OPENAI_MODEL_RICH", "gpt-4o")
-    response = client.responses.create(
-        model=model,
-        tools=[{"type": "web_search_preview"}],
-        input=[
-            {"role": "system", "content": "You research local restaurants using web search and provided documents. Return JSON only."},
-            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
-        ],
-    )
+    try:
+        from openai import OpenAI, RateLimitError, APIConnectionError, APITimeoutError, OpenAIError
+    except ImportError:
+        return None
+
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    retryable = (RateLimitError, APIConnectionError, APITimeoutError)
+    last_exc = None
+    for attempt in range(3):
+        try:
+            response = client.responses.create(
+                model=model,
+                tools=[{"type": "web_search_preview"}],
+                input=[
+                    {"role": "system", "content": "You research local restaurants using web search and provided documents. Return JSON only."},
+                    {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+                ],
+            )
+            break
+        except retryable as exc:
+            last_exc = exc
+            time.sleep(1.5 * (2 ** attempt))
+        except OpenAIError:
+            return None
+    else:
+        return None
+
     try:
         data = _parse_llm_json(response.output_text)
     except json.JSONDecodeError:

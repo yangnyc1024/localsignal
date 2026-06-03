@@ -1,4 +1,7 @@
+import json
+import os
 import re
+import time
 from typing import Any, Optional
 
 
@@ -77,6 +80,58 @@ BRIEFING_SIGNALISH_PATTERNS = {
 
 class LlmEnrichmentError(RuntimeError):
     pass
+
+
+def openai_responses_call(
+    messages: list[dict],
+    json_schema: Optional[dict] = None,
+    model: Optional[str] = None,
+    max_retries: int = 3,
+    base_delay: float = 1.5,
+) -> str:
+    """Call the OpenAI Responses API with exponential-backoff retry.
+
+    Returns the raw output_text string. Raises LlmEnrichmentError on
+    permanent failure (non-retryable error or retries exhausted).
+    """
+    try:
+        from openai import OpenAI, OpenAIError, RateLimitError, APIConnectionError, APITimeoutError
+    except ImportError as exc:
+        raise LlmEnrichmentError("The openai package is not installed.") from exc
+
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+    resolved_model = model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+
+    kwargs: dict[str, Any] = {
+        "model": resolved_model,
+        "input": messages,
+    }
+    if json_schema:
+        kwargs["text"] = {
+            "format": {
+                "type": "json_schema",
+                "name": json_schema.get("name", "response"),
+                "schema": json_schema.get("schema", json_schema),
+                "strict": True,
+            }
+        }
+
+    retryable = (RateLimitError, APIConnectionError, APITimeoutError)
+    last_exc: Optional[Exception] = None
+    for attempt in range(max_retries):
+        try:
+            response = client.responses.create(**kwargs)
+            return response.output_text
+        except retryable as exc:
+            last_exc = exc
+            delay = base_delay * (2 ** attempt)
+            time.sleep(delay)
+        except OpenAIError as exc:
+            raise LlmEnrichmentError(f"OpenAI call failed: {exc}") from exc
+
+    raise LlmEnrichmentError(
+        f"OpenAI call failed after {max_retries} retries: {last_exc}"
+    ) from last_exc
 
 
 def _clean_output(value: str, fallback: str, max_length: int = 700) -> str:

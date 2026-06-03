@@ -13,6 +13,7 @@ from localsignal_engine.llm_text import (
     BRIEFING_BANNED_WORDS,
     BRIEFING_SIGNALISH_PATTERNS,
     LlmEnrichmentError,
+    openai_responses_call,
     _clean_json_value,
     _natural_join,
     _normalize_slug,
@@ -241,37 +242,15 @@ def _briefing_json_schema() -> dict[str, Any]:
 
 
 def _generate_briefing_json(prompt: dict[str, Any]) -> dict[str, Any]:
+    messages = [
+        {"role": "system", "content": "You are LocalSignal's local editor. Return JSON only."},
+        {"role": "user", "content": json.dumps(prompt, default=str)},
+    ]
+    json_schema = {"name": "localsignal_weekly_briefing", "schema": prompt["json_schema"]}
     try:
-        from openai import OpenAI, OpenAIError
-    except ImportError as exc:
-        raise LlmEnrichmentError("The openai package is not installed.") from exc
-
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    try:
-        response = client.responses.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-            input=[
-                {
-                    "role": "system",
-                    "content": "You are LocalSignal's local editor. Return JSON only.",
-                },
-                {"role": "user", "content": json.dumps(prompt, default=str)},
-            ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "localsignal_weekly_briefing",
-                    "schema": prompt["json_schema"],
-                    "strict": True,
-                }
-            },
-        )
-    except OpenAIError as exc:
-        raise LlmEnrichmentError(f"OpenAI briefing generation failed: {exc}") from exc
-
-    try:
-        return json.loads(response.output_text)
-    except (AttributeError, json.JSONDecodeError) as exc:
+        output = openai_responses_call(messages, json_schema=json_schema)
+        return json.loads(output)
+    except (json.JSONDecodeError, AttributeError) as exc:
         raise LlmEnrichmentError("OpenAI briefing did not return valid JSON.") from exc
 
 
