@@ -1,4 +1,24 @@
+import threading
+
+# DDL takes table-level locks (CREATE INDEX IF NOT EXISTS acquires a ShareLock
+# even when the index already exists), which deadlocks against concurrent
+# INSERTs from enrichment workers. Run the DDL once per process.
+_schema_ready = False
+_schema_lock = threading.Lock()
+
+
 def ensure_place_knowledge_schema(conn) -> None:
+    global _schema_ready
+    if _schema_ready:
+        return
+    with _schema_lock:
+        if _schema_ready:
+            return
+        _run_schema_ddl(conn)
+        _schema_ready = True
+
+
+def _run_schema_ddl(conn) -> None:
     conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     conn.execute(
         """

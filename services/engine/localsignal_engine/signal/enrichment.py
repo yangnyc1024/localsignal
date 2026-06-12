@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 from uuid import UUID
@@ -28,6 +29,7 @@ from localsignal_engine.llm import (
     _clean_output,
     _dedupe,
     _sanitize_banned_words,
+    find_banned_words,
     openai_responses_call,
 )
 from localsignal_engine.signal.briefing import (
@@ -249,7 +251,7 @@ def _validate_result(result: dict[str, Any], evidence: list) -> None:
         str(result.get(key, ""))
         for key in ["title", "short_summary", "ai_summary", "why_this_matters", "confidence_reason"]
     ).lower()
-    banned_hits = sorted(word for word in BANNED_WORDS if word in text)
+    banned_hits = find_banned_words(text, BANNED_WORDS)
     if banned_hits:
         _sanitize_banned_words(result, banned_hits)
 
