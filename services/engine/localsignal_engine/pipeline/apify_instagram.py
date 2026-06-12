@@ -260,7 +260,9 @@ def _record_search_run(
 
 
 def _merge_env_dataset_ids(dataset_ids: list[str]) -> None:
-    env_path = Path(".env")
+    # Prefer the path set via ENV_FILE env var (host-mounted .env), then fall back to CWD.
+    env_file = os.getenv("ENV_FILE", "").strip()
+    env_path = Path(env_file) if env_file else Path(".env")
     existing_text = env_path.read_text() if env_path.exists() else ""
     current: list[str] = []
     lines = existing_text.splitlines()

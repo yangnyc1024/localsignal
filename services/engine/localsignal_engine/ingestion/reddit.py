@@ -39,9 +39,10 @@ class RedditAdapter(IngestionAdapter):
                     _record_reddit_run(status="succeeded", total_queries=query_count, parsed_items=len(mentions))
                     return mentions
                 query = urllib.parse.quote(query_text)
+                time_window = os.getenv("REDDIT_TIME_WINDOW", "month")
                 url = (
                     f"https://www.reddit.com/r/{subreddit}/search.json"
-                    f"?q={query}&restrict_sr=1&sort=new&t=week&limit=10"
+                    f"?q={query}&restrict_sr=1&sort=new&t={time_window}&limit=25"
                 )
                 query_count += 1
                 try:
@@ -73,7 +74,7 @@ class RedditAdapter(IngestionAdapter):
                     body = f"{title}\n{selftext}".strip()
                     if not body:
                         continue
-                    if not _is_relevant_to_place(body, place):
+                    if not _is_relevant_to_place(body, place, subreddit):
                         continue
                     permalink = data.get("permalink") or ""
                     source_url = f"https://www.reddit.com{permalink}" if permalink else url
@@ -138,16 +139,44 @@ def _place_queries(places: list[Place]) -> list[tuple[Place, str]]:
     return unique
 
 
-def _is_relevant_to_place(body: str, place: Place) -> bool:
+def _is_relevant_to_place(body: str, place: Place, subreddit: str = "") -> bool:
+    """Return True if the Reddit post body is relevant to the given place.
+
+    Matching strategy (any one is sufficient):
+    1. Exact place name appears in the body.
+    2. Enough name tokens match (handles partial/abbreviated names).
+    3. The subreddit is a local neighbourhood sub (fort lee, edgewater, etc.)
+       AND the body contains at least one food-related term — we assume
+       neighbourhood-specific subs are inherently local so any food talk is fair game.
+    4. A city/neighbourhood area term AND a food term appear together.
+    """
     lowered = body.lower()
-    name_tokens = [token for token in _tokens(place.name) if token not in {"the", "and", "bbq", "cafe", "coffee", "company", "house"}]
+    stopwords = {"the", "and", "bbq", "cafe", "coffee", "company", "house", "bar", "grill"}
+    name_tokens = [t for t in _tokens(place.name) if t not in stopwords]
+
+    # 1. Exact name match
     if place.name.lower() in lowered:
         return True
-    if name_tokens and sum(1 for token in name_tokens if token in lowered) >= min(2, len(name_tokens)):
+
+    # 2. Token overlap (≥2 tokens, or all tokens if name is short)
+    if name_tokens and sum(1 for t in name_tokens if t in lowered) >= min(2, len(name_tokens)):
         return True
-    area_terms = [place.city.lower(), (place.neighborhood or "").lower()]
-    food_terms = ["restaurant", "food", "tofu", "coffee", "cafe", "dessert", "bakery", "wait", "line"]
-    return any(term and term in lowered for term in area_terms) and any(term in lowered for term in food_terms)
+
+    food_terms = [
+        "restaurant", "food", "eat", "eating", "ate", "tofu", "coffee", "cafe",
+        "dessert", "bakery", "boba", "ramen", "sushi", "bbq", "brunch", "lunch",
+        "dinner", "breakfast", "menu", "order", "takeout", "delivery", "reservation",
+        "wait", "line", "service", "dish", "taste", "review", "recommend",
+    ]
+
+    # 3. Local neighbourhood subreddit — any food mention is relevant
+    local_subs = {"fortlee", "edgewater", "palisadespark"}
+    if subreddit.lower().replace(" ", "") in local_subs:
+        return any(term in lowered for term in food_terms)
+
+    # 4. Area term + food term
+    area_terms = [t for t in [place.city.lower(), (place.neighborhood or "").lower()] if t]
+    return any(term in lowered for term in area_terms) and any(term in lowered for term in food_terms)
 
 
 def _tokens(value: str) -> list[str]:

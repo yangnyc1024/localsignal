@@ -84,6 +84,7 @@ services:
     command: ["python", "-m", "localsignal_engine.pipeline.scheduler"]
     volumes:
       - ./data/social:/data/social:ro
+      - ./.env:/app/host.env:rw
     environment:
       DATABASE_URL: postgresql://localsignal:localsignal@db:5432/localsignal
       RESEND_API_KEY: ${RESEND_API_KEY:-}
@@ -124,6 +125,17 @@ services:
       WEEKLY_INTERVAL_SECONDS: ${WEEKLY_INTERVAL_SECONDS:-604800}
       SCHEDULER_RUN_ON_START: ${SCHEDULER_RUN_ON_START:-true}
       SEND_DIGEST_ENABLED: ${SEND_DIGEST_ENABLED:-false}
+      INSTAGRAM_SCRAPE_ENABLED: ${INSTAGRAM_SCRAPE_ENABLED:-true}
+      INSTAGRAM_SCRAPE_INTERVAL_SECONDS: ${INSTAGRAM_SCRAPE_INTERVAL_SECONDS:-259200}
+      APIFY_INSTAGRAM_HASHTAG_QUERIES: ${APIFY_INSTAGRAM_HASHTAG_QUERIES:-}
+      APIFY_INSTAGRAM_SEARCH_LIMIT: ${APIFY_INSTAGRAM_SEARCH_LIMIT:-3}
+      APIFY_INSTAGRAM_RESULTS_LIMIT: ${APIFY_INSTAGRAM_RESULTS_LIMIT:-10}
+      APIFY_INSTAGRAM_ONLY_NEWER_THAN: ${APIFY_INSTAGRAM_ONLY_NEWER_THAN:-30 days}
+      APIFY_INSTAGRAM_MAX_CHARGE_USD: ${APIFY_INSTAGRAM_MAX_CHARGE_USD:-0.5}
+      SOCIAL_MAX_AGE_DAYS: ${SOCIAL_MAX_AGE_DAYS:-90}
+      REDDIT_TIME_WINDOW: ${REDDIT_TIME_WINDOW:-month}
+      REDDIT_FORCE_RUN: ${REDDIT_FORCE_RUN:-false}
+      ENV_FILE: /app/host.env
     depends_on:
       db:
         condition: service_healthy

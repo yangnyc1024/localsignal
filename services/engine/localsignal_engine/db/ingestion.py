@@ -252,7 +252,7 @@ def write_social_metadata_items(items: list) -> tuple:
                 elif item.resolution_status == "unresolved":
                     unresolved_count += 1
 
-                if not raw_id or item.resolution_status != "resolved" or not item.place_id:
+                if not raw_id or item.resolution_status not in ("resolved", "review") or not item.place_id:
                     continue
 
                 mention = Mention(
