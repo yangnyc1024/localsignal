@@ -3,22 +3,15 @@ import re
 import urllib.parse
 from html import escape
 
+from localsignal_engine.place.names import display_place_name
+
 from .models import Report
 from .models import ReportSignal
 
 
 def _display_place_name(name: str, max_len: int = 40) -> str:
-    """Return a clean, Latin-only, truncated place name for display."""
-    # Strip CJK characters
-    latin = re.sub(r"[가-힯ᄀ-ᇿ㄰-㆏一-鿿぀-ヿ＀-￯]+", "", name).strip()
-    # Unwrap if parens wrap the whole remaining string
-    latin = re.sub(r"^\s*\(\s*(.*?)\s*\)\s*$", r"\1", latin).strip()
-    # Strip leading/trailing punctuation artifacts
-    latin = re.sub(r"^[|/\-,\s]+|[|/\-,\s]+$", "", latin).strip()
-    cleaned = re.sub(r"\s*\|.*$", "", (latin or name)).strip()
-    cleaned = re.sub(r"\s*-\s*Cajun Seafood.*$", "", cleaned, flags=re.IGNORECASE).strip()
-    cleaned = re.sub(r"\s+Nj\b", "", cleaned, flags=re.IGNORECASE).strip()
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    """Truncate for email layout; cleaning itself lives in place.names."""
+    cleaned = display_place_name(name)
     if len(cleaned) <= max_len:
         return cleaned
     m = re.search(r" [-|/] ", cleaned)
@@ -55,51 +48,6 @@ def _has_briefing(report: Report) -> bool:
     return bool(briefing.get("title") and briefing.get("subtitle") and briefing.get("why_it_matters"))
 
 
-def _signal_text(signal: ReportSignal) -> str:
-    keywords = " ".join(str(keyword) for keyword in signal.evidence.get("keywords", []))
-    return " ".join(
-        [
-            signal.title,
-            signal.summary,
-            signal.place_name,
-            signal.place_category,
-            signal.signal_type,
-            keywords,
-        ]
-    ).lower()
-
-
-def _matches_korean(signal: ReportSignal) -> bool:
-    text = _signal_text(signal)
-    return any(term in text for term in ["korean", "tofu", "bbq", "banchan", "so gong dong", "bcd"])
-
-
-def _matches_cafe(signal: ReportSignal) -> bool:
-    text = _signal_text(signal)
-    return any(term in text for term in ["cafe", "coffee", "kuppi", "remote", "wifi", "outlet"])
-
-
-def _matches_dessert(signal: ReportSignal) -> bool:
-    text = _signal_text(signal)
-    return any(term in text for term in ["dessert", "bakery", "cake", "pastry", "matcha", "sweet", "cream"])
-
-
-def _matches_late_night(signal: ReportSignal) -> bool:
-    text = _signal_text(signal)
-    return any(term in text for term in ["late night", "late-night", "after 9", "midnight", "night"])
-
-
-def _matches_opening(signal: ReportSignal) -> bool:
-    text = _signal_text(signal)
-    return any(term in text for term in ["opening", "new menu", "soft opening", "new place"])
-
-
-def _is_strong_signal(signal: ReportSignal) -> bool:
-    source_count = int(signal.evidence.get("source_count") or len(signal.evidence.get("sources", [])) or 0)
-    mention_count = int(signal.evidence.get("current_mention_count") or signal.evidence.get("mention_count") or 0)
-    return signal.score >= 70 and source_count >= 2 and mention_count >= 2
-
-
 def _evidence_assessment(signal: ReportSignal) -> str:
     source_count = int(signal.evidence.get("source_count") or len(signal.evidence.get("sources", [])) or 0)
     mention_count = int(signal.evidence.get("current_mention_count") or signal.evidence.get("mention_count") or 0)
@@ -110,89 +58,9 @@ def _evidence_assessment(signal: ReportSignal) -> str:
     return "Evidence coverage is still building for this signal."
 
 
-def _confidence(signal: ReportSignal) -> str:
-    source_count = int(signal.evidence.get("source_count") or len(signal.evidence.get("sources", [])) or 0)
-    mention_count = int(signal.evidence.get("current_mention_count") or 0)
-    if source_count >= 2 and mention_count >= 3:
-        return "High"
-    if source_count >= 2 or mention_count >= 2:
-        return "Medium"
-    return "Low"
-
-
 def _maps_url(signal: ReportSignal) -> str:
     query = urllib.parse.quote_plus(f"{signal.place_name} {signal.city} NJ")
     return f"https://www.google.com/maps/search/{query}"
-
-
-def _category_statuses(report: Report) -> list:
-    channels = [
-        ("Korean Food", _matches_korean),
-        ("Cafes", _matches_cafe),
-        ("Desserts", _matches_dessert),
-        ("Late-night", _matches_late_night),
-        ("New Opening", _matches_opening),
-    ]
-    statuses = []
-    for label, matcher in channels:
-        matched = [signal for signal in report.signals if matcher(signal)]
-        strong = [signal for signal in matched if _is_strong_signal(signal)]
-        if strong:
-            top = max(strong, key=lambda signal: signal.score)
-            statuses.append(
-                {
-                    "label": label,
-                    "status": "Strong signal",
-                    "detail": f"{top.place_name} is carrying the clearest weekly evidence.",
-                    "color": "#4f6b5d",
-                }
-            )
-        elif matched:
-            top = max(matched, key=lambda signal: signal.score)
-            statuses.append(
-                {
-                    "label": label,
-                    "status": "Watching",
-                    "detail": f"Early movement around {top.place_name}, but evidence is still developing.",
-                    "color": "#9a563c",
-                }
-            )
-        else:
-            statuses.append(
-                {
-                    "label": label,
-                    "status": "No strong signal detected",
-                    "detail": "Still monitoring new mentions, wait-time changes, and cross-platform activity.",
-                    "color": "rgba(22,32,29,0.52)",
-                }
-            )
-    return statuses
-
-
-def _category_status_text(report: Report) -> list:
-    return [f"- {status['label']}: {status['status']} — {status['detail']}" for status in _category_statuses(report)]
-
-
-def _category_status_html(report: Report) -> str:
-    items = "\n".join(
-        f"""
-        <tr>
-          <td style="padding:9px 8px 9px 0;border-top:1px solid #e5dccf;font-size:14px;line-height:20px;font-weight:700;color:#16201d;">{escape(status['label'])}</td>
-          <td style="padding:9px 8px;border-top:1px solid #e5dccf;font-size:13px;line-height:19px;font-weight:700;color:{escape(status['color'])};">{escape(status['status'])}</td>
-          <td style="padding:9px 0 9px 8px;border-top:1px solid #e5dccf;font-size:13px;line-height:19px;color:rgba(22,32,29,0.68);">{escape(status['detail'])}</td>
-        </tr>
-        """
-        for status in _category_statuses(report)
-    )
-    return f"""
-      <div style="margin-top:18px;padding:15px;border:1px solid #ddd4c6;border-radius:8px;background:rgba(255,255,255,0.88);">
-        <div style="font-size:13px;line-height:18px;font-weight:700;text-transform:uppercase;color:#4f6b5d;">Category watch</div>
-        <div style="margin-top:5px;font-size:13px;line-height:20px;color:rgba(22,32,29,0.66);">Signals are only generated when evidence clears the weekly threshold.</div>
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px;border-collapse:collapse;">
-          {items}
-        </table>
-      </div>
-    """
 
 
 def _render_briefing_html(report: Report) -> str:
@@ -341,9 +209,6 @@ def _render_text(report: Report) -> str:
         "",
         _briefing_summary(report),
         "",
-        "Category watch",
-        *_category_status_text(report),
-        "",
     ]
     for index, signal in enumerate(report.signals, start=1):
         lines.extend(
@@ -386,7 +251,7 @@ def _render_html(report: Report) -> str:
                 <td align="right" style="padding:0;vertical-align:top;">
                   <div style="font-size:11px;line-height:16px;font-weight:700;text-transform:uppercase;color:rgba(22,32,29,0.48);">Score</div>
                   <div style="margin-top:3px;font-size:18px;line-height:22px;font-weight:700;color:#16201d;">{signal.score:.1f}</div>
-                  <div style="margin-top:4px;font-size:12px;line-height:17px;font-weight:700;color:#4f6b5d;">{escape(signal.confidence_level or _confidence(signal))} confidence</div>
+                  <div style="margin-top:4px;font-size:12px;line-height:17px;font-weight:700;color:#4f6b5d;">{escape(signal.confidence_level or "Low")} confidence</div>
                   <a href="{escape(_maps_url(signal))}" style="display:inline-block;margin-top:8px;font-size:13px;line-height:18px;font-weight:700;color:#9a563c;text-decoration:none;">Open Maps</a>
                 </td>
               </tr>
@@ -412,7 +277,6 @@ def _render_html(report: Report) -> str:
               <h1 style="max-width:620px;margin:16px 0 0 0;font-size:42px;line-height:46px;font-weight:700;color:#16201d;">{escape(report.title)}</h1>
               <p style="max-width:610px;margin:15px 0 0 0;font-size:17px;line-height:27px;color:rgba(22,32,29,0.75);">{escape(report.intro)}</p>
               <p style="max-width:610px;margin:12px 0 0 0;font-size:15px;line-height:24px;color:rgba(22,32,29,0.68);">{escape(_briefing_summary(report))}</p>
-              {_category_status_html(report)}
               <div style="margin-top:18px;padding:15px;border:1px solid #ddd4c6;border-radius:8px;background:rgba(255,255,255,0.88);">
                 <div style="font-size:14px;line-height:20px;font-weight:700;color:#16201d;">Week of {escape(report.week_start)}</div>
                 <div style="margin-top:5px;font-size:14px;line-height:20px;color:rgba(22,32,29,0.66);">{escape(report.region)}</div>

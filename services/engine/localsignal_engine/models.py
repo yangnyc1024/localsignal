@@ -15,6 +15,7 @@ class Place:
     longitude: Optional[float] = None
     google_place_id: Optional[str] = None
     map_url: Optional[str] = None
+    display_name: Optional[str] = None
 
 
 @dataclass(frozen=True)

@@ -3,10 +3,25 @@ import re
 from typing import Any
 
 from localsignal_engine.models import Signal
+from localsignal_engine.place.names import display_place_name
+
+# Short, stable per-type slug fragments. The slug key matches the DB
+# uniqueness key (place_id, signal_type, week_start), so this format is
+# guaranteed unique and never leaks generated prose into URLs.
+_SLUG_TYPE_LABELS = {
+    "review_velocity_spike": "attention",
+    "keyword_spike": "keywords",
+    "sentiment_shift": "sentiment",
+    "behavior_shift": "behavior",
+    "new_place_detected": "new-place",
+}
+
+_SLUG_PLACE_MAX_CHARS = 32
 
 
 def story_fields_for_signal(signal: Signal) -> dict:
     evidence = signal.evidence
+    place_name = display_place_name(signal.place.display_name or signal.place.name)
     keywords = [str(k) for k in evidence.get("keywords", [])]
     category = signal.place.category.replace("_", " ").title()
     topic, keyword_text = story_topic(keywords, category)
@@ -15,20 +30,20 @@ def story_fields_for_signal(signal: Signal) -> dict:
     mention_count = int(evidence.get("current_mention_count") or evidence.get("mention_count") or 0)
     if signal.signal_type == "sentiment_shift":
         phenomenon_title = (
-            f"{signal.place.name} has a changing wait-time read"
+            f"{place_name} has a changing wait-time read"
             if topic == "Wait-time"
-            else f"{signal.place.name} has a changing {topic.lower()} read"
+            else f"{place_name} has a changing {topic.lower()} read"
         )
     elif signal.signal_type == "behavior_shift":
-        phenomenon_title = f"{signal.place.name} has a changing {topic.lower()} visit read"
+        phenomenon_title = f"{place_name} has a changing {topic.lower()} visit read"
     elif signal.signal_type == "review_velocity_spike":
-        phenomenon_title = f"{signal.place.name} is getting more recent attention for {topic.lower()}"
+        phenomenon_title = f"{place_name} is getting more recent attention for {topic.lower()}"
     else:
-        phenomenon_title = f"{signal.place.name} is showing repeated language around {topic.lower()}"
+        phenomenon_title = f"{place_name} is showing repeated language around {topic.lower()}"
     return {
         "phenomenon_title": phenomenon_title,
         "food_or_cuisine_type": category,
-        "place_anchor_reason": f"{signal.place.name} is the place where this food read is anchored, not a blanket recommendation.",
+        "place_anchor_reason": f"{place_name} is the place where this food read is anchored, not a blanket recommendation.",
         "reader_hook": phenomenon_title,
         "what_to_notice": f"Watch the repeated language around {keyword_text}; do not read this as a best-of ranking.",
         "skeptic_note": "Evidence is still narrow until it repeats across more independent sources.",
@@ -77,7 +92,7 @@ def product_fields(signal: Signal) -> dict:
     fields = story_fields_for_signal(signal)
     signal.evidence.update({k: v for k, v in fields.items() if k not in signal.evidence or not signal.evidence.get(k)})
     return {
-        "slug": slugify(fields.get("phenomenon_title") or signal.title),
+        "slug": signal_slug(signal),
         "short_summary": short,
         "ai_summary": ai_summary(signal, short),
         "why_this_matters": why_this_matters(signal),
@@ -170,17 +185,30 @@ def ai_summary(signal: Signal, short: str) -> str:
 
 
 def why_this_matters(signal: Signal) -> str:
+    place_name = display_place_name(signal.place.display_name or signal.place.name)
     if signal.signal_type == "behavior_shift":
-        return f"{signal.place.name} is showing behavior change, which can indicate a new food-use occasion rather than normal attention."
+        return f"{place_name} is showing behavior change, which can indicate a new food-use occasion rather than normal attention."
     if signal.signal_type == "sentiment_shift":
         return (
-            f"{signal.place.name} has a directional service or wait-time signal worth watching "
+            f"{place_name} has a directional service or wait-time signal worth watching "
             "because momentum can change quickly when complaints repeat."
         )
     if signal.signal_type == "review_velocity_spike":
-        return f"{signal.place.name} is gaining attention faster than its recent baseline, suggesting broader food discovery momentum."
-    return f"{signal.place.name} has new language clustering around it, which can be an early indicator of emerging demand."
+        return f"{place_name} is gaining attention faster than its recent baseline, suggesting broader food discovery momentum."
+    return f"{place_name} has new language clustering around it, which can be an early indicator of emerging demand."
 
 
 def slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-") or "signal"
+
+
+def signal_slug(signal: Signal) -> str:
+    place_part = slugify(display_place_name(signal.place.display_name or signal.place.name))
+    kept: list[str] = []
+    for word in place_part.split("-"):
+        if len("-".join(kept + [word])) > _SLUG_PLACE_MAX_CHARS:
+            break
+        kept.append(word)
+    place_part = "-".join(kept) or "place"
+    type_part = _SLUG_TYPE_LABELS.get(signal.signal_type, "signal")
+    return f"{place_part}-{type_part}-{signal.week_start}"

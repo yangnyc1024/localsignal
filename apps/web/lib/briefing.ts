@@ -551,19 +551,17 @@ function scopeSummary(report: Report) {
 }
 
 function cleanPlaceName(value: string, maxLen = 40): string {
-  // Strip CJK characters (Korean, Chinese, Japanese)
-  let latin = value.replace(/[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\u4E00-\u9FFF\u3040-\u30FF\uFF00-\uFFEF]+/g, "").trim();
-  // Unwrap if parens contain the whole remaining string e.g. "(Chungchoon Sikdang)"
-  latin = latin.replace(/^\s*\(\s*(.*?)\s*\)\s*$/, "$1").trim();
-  // Remove leading/trailing punctuation artifacts
-  latin = latin.replace(/^[|/\-,\s]+|[|/\-,\s]+$/g, "").trim();
-  const cleaned = (latin || value)
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
-    .replace(/\s*\|.*$/, "")
-    .replace(/\s*-\s*Cajun Seafood.*$/i, "")
-    .replace(/\s+Nj\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Mirrors the engine's place.names cleaning; keeps CJK characters.
+  // Canonical cleaning lives server-side in places.display_name; this guards
+  // briefing JSON generated before that column existed.
+  let cleaned = value.replace(/[\u0000-\u001f]/g, " ").split("|")[0];
+  const head = cleaned.split(/\s+[-\u2013\u2014/]\s+/)[0].trim();
+  if (head.length >= 6) cleaned = head;
+  cleaned =
+    cleaned
+      .replace(/\s+/g, " ")
+      .replace(/^[\s\-\u2013\u2014/,|]+|[\s\-\u2013\u2014/,|]+$/g, "")
+      .trim() || value.trim();
   if (cleaned.length <= maxLen) return cleaned;
   const cutAt = cleaned.search(/ [-|/] /);
   if (cutAt > 8 && cutAt <= maxLen) return cleaned.slice(0, cutAt).trim();

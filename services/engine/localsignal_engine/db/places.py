@@ -1,12 +1,13 @@
 from localsignal_engine.models import Place
 from localsignal_engine.db.connection import get_conn
+from localsignal_engine.place.names import display_place_name
 
 
 def load_places() -> list:
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT id::text, name, category, city, neighborhood, latitude, longitude, google_place_id, map_url
+            SELECT id::text, name, category, city, neighborhood, latitude, longitude, google_place_id, map_url, display_name
             FROM places
             ORDER BY city, name
             """
@@ -22,6 +23,7 @@ def load_places() -> list:
             longitude=row[6],
             google_place_id=row[7],
             map_url=row[8],
+            display_name=row[9] or display_place_name(row[1]),
         )
         for row in rows
     ]
@@ -42,6 +44,7 @@ def upsert_places_from_discovery(places: list) -> int:
                     """
                     INSERT INTO places (
                       name,
+                      display_name,
                       category,
                       address,
                       city,
@@ -51,10 +54,11 @@ def upsert_places_from_discovery(places: list) -> int:
                       google_place_id,
                       map_url
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (google_place_id) WHERE google_place_id IS NOT NULL
                     DO UPDATE SET
                       name = EXCLUDED.name,
+                      display_name = EXCLUDED.display_name,
                       category = EXCLUDED.category,
                       address = EXCLUDED.address,
                       city = EXCLUDED.city,
@@ -66,6 +70,7 @@ def upsert_places_from_discovery(places: list) -> int:
                     """,
                     (
                         place["name"],
+                        display_place_name(place["name"]),
                         place["category"],
                         place.get("address"),
                         place["city"],

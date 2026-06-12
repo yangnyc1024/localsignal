@@ -1,5 +1,6 @@
 """place subpackage — re-exports every public symbol from the old place_knowledge module."""
 
+from .names import display_place_name
 from .schema import ensure_place_knowledge_schema
 from .documents import (
     DOCUMENT_MIN_CHARS,

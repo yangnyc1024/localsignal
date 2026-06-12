@@ -19,6 +19,7 @@ from localsignal_engine.llm import (
     _normalize_slug,
     _sanitize_banned_words,
     _truncate_sentence,
+    find_banned_words,
 )
 
 
@@ -51,7 +52,7 @@ def _report_signals(conn, report_id: UUID) -> list[dict]:
           s.confidence_reason,
           json_build_object(
             'id', p.id,
-            'name', p.name,
+            'name', COALESCE(NULLIF(p.display_name, ''), p.name),
             'category', p.category,
             'address', p.address,
             'neighborhood', p.neighborhood,
@@ -290,7 +291,7 @@ def _validate_public_language(briefing: dict[str, Any]) -> None:
             " ".join(str(item.get("detail") or "") for item in briefing.get("sources") or []),
         ]
     ).lower()
-    hits = sorted(word for word in BRIEFING_BANNED_WORDS if word in public_text)
+    hits = find_banned_words(public_text, BRIEFING_BANNED_WORDS)
     if hits:
         _sanitize_banned_words(briefing, hits)
 

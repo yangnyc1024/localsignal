@@ -2,6 +2,7 @@ import os
 from typing import Any, Optional
 
 from localsignal_engine.llm import _clean_place_name, _dedupe
+from localsignal_engine.place.names import display_place_name
 
 
 def _min_evidence_count() -> int:
@@ -61,7 +62,7 @@ def _story_topic(keywords: list, category: str):
 
 def _story_fields(signal: dict, keywords: list, evidence: dict) -> dict[str, Any]:
     place = signal["place"]
-    place_name = place.get("name") or "This place"
+    place_name = display_place_name(place.get("display_name") or place.get("name") or "This place")
     category = str(place.get("category") or "food").replace("_", " ").title()
     title_topic, keyword_text = _story_topic(keywords, category)
     if signal["signal_type"] == "sentiment_shift":

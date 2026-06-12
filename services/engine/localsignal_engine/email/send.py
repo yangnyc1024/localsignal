@@ -18,6 +18,10 @@ def send_latest_digest() -> int:
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is required to send digests.")
+    # Every link in the digest is built from WEB_BASE_URL; a real send with the
+    # localhost default would deliver dead links to every subscriber.
+    if os.getenv("RESEND_API_KEY") and not os.getenv("WEB_BASE_URL"):
+        raise RuntimeError("WEB_BASE_URL is required to send real emails (links would point to localhost).")
 
     with get_conn() as conn:
         report = _latest_report(conn)
@@ -62,7 +66,7 @@ def _latest_report(conn) -> Report:
           s.summary,
           s.city,
           s.score::float AS score,
-          p.name AS place_name,
+          COALESCE(NULLIF(p.display_name, ''), p.name) AS place_name,
           p.category AS place_category,
           p.neighborhood AS place_neighborhood,
           s.signal_type,
