@@ -2,7 +2,7 @@ import json
 import os
 import re
 import time
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 
 BANNED_WORDS = {
@@ -151,57 +151,91 @@ def _clean_json_value(value: Any) -> Any:
     return value
 
 
+_BANNED_WORD_REPLACEMENTS = {
+    "activity": "movement",
+    "anomaly": "unusual read",
+    "baseline": "usual rhythm",
+    "chatter": "talk",
+    "confidence": "read",
+    "dashboard": "brief",
+    "detection": "read",
+    "engagement": "attention",
+    "experience": "visit",
+    "evidence receipt": "source note",
+    "metric": "read",
+    "momentum": "movement",
+    "popular": "busy",
+    "popularity": "busy-ness",
+    "quality": "food",
+    "repeated clue": "repeated cue",
+    "service quality": "service",
+    "source count": "source mix",
+    "source diversity": "source mix",
+    "source type": "source",
+    "signal type": "read type",
+    "taxonomy": "category",
+    "dining choices": "local read",
+    "diverse dining visits": "different meals",
+    "dining visits": "meals",
+    "restaurant atmospheres": "dinner settings",
+    "recent uptick": "recent mentions",
+    "expectations": "read",
+    "demand": "pull",
+    "consumer perception": "local read",
+    "customer experience": "visit language",
+    "customers": "visitors",
+    "customer": "visitor",
+    "patrons": "visitors",
+    "market dynamics": "local movement",
+    "business reputation": "local read",
+    "decision making": "local read",
+    "promotional activity": "promotion",
+    "recommendation": "signal",
+    "recommended": "noted",
+    "top rated": "highly rated",
+    "must try": "notable",
+    "best": "notable",
+}
+
+
+def _word_pattern(word: str) -> re.Pattern:
+    return re.compile(rf"\b{re.escape(word)}\b", flags=re.IGNORECASE)
+
+
+def find_banned_words(text: str, banned_words: Iterable[str]) -> list[str]:
+    """Return banned words present in text as whole words/phrases, not substrings."""
+    return sorted(word for word in banned_words if _word_pattern(word).search(text))
+
+
+def _replace_banned_word(text: str, word: str, replacement: str) -> str:
+    def substitute(match: re.Match) -> str:
+        # Drop the banned word instead of replacing it when the replacement
+        # would sit next to an identical word ("food quality" -> "food",
+        # never "food food").
+        repl_words = replacement.split()
+        if repl_words:
+            before = re.findall(r"[\w'-]+", match.string[: match.start()])
+            after = re.findall(r"[\w'-]+", match.string[match.end() :])
+            if before and before[-1].lower() == repl_words[0].lower():
+                return ""
+            if after and after[0].lower() == repl_words[-1].lower():
+                return ""
+        if replacement and match.group()[0].isupper():
+            return replacement[0].upper() + replacement[1:]
+        return replacement
+
+    return _word_pattern(word).sub(substitute, text)
+
+
 def _sanitize_banned_words(value: Any, banned_words: Optional[list[str]] = None) -> Any:
-    replacements = {
-        "activity": "movement",
-        "anomaly": "unusual read",
-        "baseline": "usual rhythm",
-        "chatter": "talk",
-        "confidence": "read",
-        "dashboard": "brief",
-        "detection": "read",
-        "engagement": "attention",
-        "experience": "visit",
-        "evidence receipt": "source note",
-        "metric": "read",
-        "momentum": "movement",
-        "popular": "busy",
-        "popularity": "busy-ness",
-        "quality": "food",
-        "repeated clue": "repeated cue",
-        "service quality": "service",
-        "source count": "source mix",
-        "source diversity": "source mix",
-        "source type": "source",
-        "signal type": "read type",
-        "taxonomy": "category",
-        "dining choices": "local read",
-        "diverse dining visits": "different meals",
-        "dining visits": "meals",
-        "restaurant atmospheres": "dinner settings",
-        "recent uptick": "recent mentions",
-        "expectations": "read",
-        "demand": "pull",
-        "consumer perception": "local read",
-        "customer experience": "visit language",
-        "customers": "visitors",
-        "customer": "visitor",
-        "patrons": "visitors",
-        "market dynamics": "local movement",
-        "business reputation": "local read",
-        "decision making": "local read",
-        "promotional activity": "promotion",
-        "recommendation": "signal",
-        "recommended": "noted",
-        "top rated": "highly rated",
-        "must try": "notable",
-        "best": "notable",
-    }
-    active = banned_words or list(replacements)
+    active = list(banned_words) if banned_words else list(_BANNED_WORD_REPLACEMENTS)
+    # Longest first so phrases ("service quality") win over their substrings ("quality").
+    active.sort(key=len, reverse=True)
     if isinstance(value, str):
         cleaned = value
         for word in active:
-            cleaned = re.sub(re.escape(word), replacements.get(word, ""), cleaned, flags=re.IGNORECASE)
+            cleaned = _replace_banned_word(cleaned, word, _BANNED_WORD_REPLACEMENTS.get(word, ""))
+        cleaned = re.sub(r"\s+([.,;:!?])", r"\1", cleaned)
         return re.sub(r"\s+", " ", cleaned).strip()
     if isinstance(value, list):
         for index, item in enumerate(value):
