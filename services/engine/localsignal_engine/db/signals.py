@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from psycopg.types.json import Jsonb
@@ -200,23 +200,35 @@ def write_weekly_report(signals: list, region: str = DEFAULT_REGION) -> UUID:
     return report_id
 
 
-def link_evidence_chunks_to_signals(limit_per_signal: int = 10) -> int:
+def link_evidence_chunks_to_signals(limit_per_signal: int = 10, report_id: Optional[UUID] = None) -> int:
+    """Link supporting evidence chunks to published signals.
+
+    The evidence window is anchored to each signal's published_at so a weekly
+    report stays an immutable snapshot: re-running this later must not pull in
+    chunks that appeared after the signal was published. Pass report_id to
+    restrict linking to one report instead of rewriting every past week.
+    """
     linked = 0
     with get_conn() as conn:
         rows = conn.execute(
             """
             SELECT
-              id,
-              place_id,
-              evidence
-            FROM signals
-            WHERE status = 'published'
-            ORDER BY week_start DESC, score DESC
-            """
+              s.id,
+              s.place_id,
+              s.evidence,
+              COALESCE(s.published_at, s.created_at) AS anchored_at
+            FROM signals s
+            WHERE s.status = 'published'
+              AND (%s::uuid IS NULL OR s.id IN (
+                SELECT rs.signal_id FROM report_signals rs WHERE rs.report_id = %s
+              ))
+            ORDER BY s.week_start DESC, s.score DESC
+            """,
+            (report_id, report_id),
         ).fetchall()
 
         with conn.cursor() as cur:
-            for signal_id, place_id, evidence in rows:
+            for signal_id, place_id, evidence, anchored_at in rows:
                 keywords = [str(keyword).lower() for keyword in (evidence or {}).get("keywords", [])]
                 current_days = int((evidence or {}).get("current_window_days") or 14)
                 cur.execute("DELETE FROM signal_evidence WHERE signal_id = %s", (signal_id,))
@@ -230,13 +242,14 @@ def link_evidence_chunks_to_signals(limit_per_signal: int = 10) -> int:
                     FROM evidence_chunks e
                     JOIN raw_source_items r ON r.id = e.raw_source_item_id
                     WHERE e.place_id = %s
-                      AND e.occurred_at >= now() - (%s || ' days')::interval
+                      AND e.occurred_at >= %s::timestamptz - (%s || ' days')::interval
+                      AND e.occurred_at <= %s::timestamptz
                       AND r.platform <> 'google_places'
                       AND length(e.chunk_text) >= 25
                     ORDER BY occurred_at DESC
                     LIMIT 30
                     """,
-                    (place_id, current_days),
+                    (place_id, anchored_at, current_days, anchored_at),
                 ).fetchall()
                 ranked = sorted(
                     (
@@ -267,6 +280,52 @@ def link_evidence_chunks_to_signals(limit_per_signal: int = 10) -> int:
                 cur.execute("UPDATE signals SET evidence_ids = %s WHERE id = %s", (linked_ids, signal_id))
         conn.commit()
     return linked
+
+
+def hide_zero_evidence_signals(report_id: UUID) -> int:
+    """Hide published report signals that ended up with no linked evidence.
+
+    Evidence linking runs after the report is written, so a signal can be
+    published before we know whether any chunk supports it. A signal without
+    user-visible evidence must not stay in the weekly report.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            rows = cur.execute(
+                """
+                SELECT s.id
+                FROM signals s
+                JOIN report_signals rs ON rs.signal_id = s.id
+                WHERE rs.report_id = %s
+                  AND s.status = 'published'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM signal_evidence se WHERE se.signal_id = s.id
+                  )
+                """,
+                (report_id,),
+            ).fetchall()
+            hidden_ids = [row[0] for row in rows]
+            if hidden_ids:
+                cur.execute(
+                    "UPDATE signals SET status = 'hidden', rank = NULL WHERE id = ANY(%s)",
+                    (hidden_ids,),
+                )
+                cur.execute(
+                    "DELETE FROM report_signals WHERE report_id = %s AND signal_id = ANY(%s)",
+                    (report_id, hidden_ids),
+                )
+                survivors = cur.execute(
+                    "SELECT signal_id FROM report_signals WHERE report_id = %s ORDER BY rank",
+                    (report_id,),
+                ).fetchall()
+                for new_rank, (signal_id,) in enumerate(survivors, start=1):
+                    cur.execute(
+                        "UPDATE report_signals SET rank = %s WHERE report_id = %s AND signal_id = %s",
+                        (new_rank, report_id, signal_id),
+                    )
+                    cur.execute("UPDATE signals SET rank = %s WHERE id = %s", (new_rank, signal_id))
+        conn.commit()
+    return len(hidden_ids)
 
 
 def _chunk_relevance(chunk_text: str, extracted_keywords: list, signal_keywords: list) -> float:

@@ -8,6 +8,7 @@ from psycopg.rows import dict_row
 from localsignal_engine.baseline import compute_baseline_profiles
 from localsignal_engine.db import (
     finish_ingestion_run,
+    hide_zero_evidence_signals,
     link_evidence_chunks_to_signals,
     load_places,
     load_recent_mentions,
@@ -73,7 +74,10 @@ def run_once() -> None:
             raise RuntimeError("No signals generated from live ingestion.")
 
         report_id = write_weekly_report(signals)
-        linked_count = link_evidence_chunks_to_signals()
+        linked_count = link_evidence_chunks_to_signals(report_id=report_id)
+        hidden_count = hide_zero_evidence_signals(report_id)
+        if hidden_count:
+            logger.warning("Hid %d report signals with no linked evidence.", hidden_count)
         place_knowledge_metrics = (
             _refresh_place_knowledge(signals) if _place_knowledge_weekly_enabled() else {"enabled": False}
         )

@@ -1,11 +1,13 @@
 """Signal generation: tokenisation, scoring, classification, and explanation."""
 import math
+import os
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from localsignal_engine.models import Mention, Place, Signal
+from localsignal_engine.place.names import display_place_name
 
 
 # ── constants ────────────────────────────────────────────────────────────────
@@ -18,6 +20,16 @@ STOPWORDS = {
     "relative", "she", "still", "time", "the", "their", "there", "that",
     "they", "this", "very", "week", "were", "was", "when", "whatever",
     "which", "will", "with", "would", "you", "your",
+}
+
+# Generic praise/service vocabulary that appears in almost every Google review.
+# It carries no change information, so it must not become a signal keyword or
+# inflate keyword-based scoring; food- and behavior-specific terms should win.
+GENERIC_PRAISE_TERMS = {
+    "amazing", "atmosphere", "attentive", "awesome", "definitely", "delicious",
+    "excellent", "experience", "food", "friendly", "good", "great", "kind",
+    "love", "loved", "nice", "really", "recommend", "server", "servers",
+    "service", "staff", "waiter", "waitress", "wonderful",
 }
 
 POSITIVE_TERMS = {
@@ -129,6 +141,8 @@ def _tokens(mentions: list[Mention]) -> Counter[str]:
 def _top_keywords(current: Counter[str], baseline: Counter[str]) -> list[str]:
     scores: list[tuple[str, float]] = []
     for token, count in current.items():
+        if token in GENERIC_PRAISE_TERMS:
+            continue
         novelty = count / math.sqrt(1 + baseline.get(token, 0))
         if novelty >= 1:
             scores.append((token, novelty))
@@ -158,8 +172,16 @@ def _velocity_ratio(current_count: int, baseline_count: int, current_days: int, 
     return current_rate / max(baseline_rate, 0.05)
 
 
+def _sentiment_shift_enabled() -> bool:
+    # Disabled until evidence_chunks.sentiment is actually populated; until then
+    # a published "sentiment shift" cannot be traced back to stored data.
+    return os.getenv("SIGNAL_SENTIMENT_SHIFT_ENABLED", "false").lower() == "true"
+
+
 def _classify(velocity_ratio: float, sentiment_delta: float, keywords: list[str]) -> str:
-    if sentiment_delta <= -0.15 or {"wait", "slow", "crowded", "overrated"}.intersection(keywords):
+    if _sentiment_shift_enabled() and (
+        sentiment_delta <= -0.15 or {"wait", "slow", "crowded", "overrated"}.intersection(keywords)
+    ):
         return "sentiment_shift"
     if {"wifi", "quiet", "remote", "work", "outlet"}.intersection(keywords):
         return "behavior_shift"
@@ -198,35 +220,36 @@ def _explain(
     source_count: int,
 ) -> tuple[str, str]:
     keyword_text = ", ".join(keywords[:3]) if keywords else "recent mentions"
+    place_name = display_place_name(place.display_name or place.name)
     topic = _title_topic(keywords, place.category)
     if signal_type == "sentiment_shift":
         return (
-            f"{place.name} has a changing wait-time read" if topic == "Wait-time"
-            else f"{place.name} has a changing {topic.lower()} read",
+            f"{place_name} has a changing wait-time read" if topic == "Wait-time"
+            else f"{place_name} has a changing {topic.lower()} read",
             f"Recent language around {keyword_text} is moving differently from the short-term baseline.",
         )
     if signal_type == "behavior_shift":
         return (
-            f"{place.name} has a changing {topic.lower()} visit read",
+            f"{place_name} has a changing {topic.lower()} visit read",
             f"Recent mentions across {source_count} source(s) increasingly point to {keyword_text}.",
         )
     if signal_type == "review_velocity_spike":
         if source_count >= 3:
             return (
-                f"{topic} is spreading across multiple source types at {place.name}",
+                f"{topic} is spreading across multiple source types at {place_name}",
                 f"Recent activity is appearing across {source_count} source types, with repeated language around {keyword_text}.",
             )
         if velocity_ratio >= 5:
             return (
-                f"{place.name} is getting more recent attention for {topic.lower()}",
+                f"{place_name} is getting more recent attention for {topic.lower()}",
                 f"Recent mentions are materially above the short-term baseline, led by language around {keyword_text}.",
             )
         return (
-            f"{place.name} is getting more recent attention for {topic.lower()}",
+            f"{place_name} is getting more recent attention for {topic.lower()}",
             f"Recent activity is moving ahead of baseline, with new keywords around {keyword_text}.",
         )
     return (
-        f"{place.name} is showing repeated language around {topic.lower()}",
+        f"{place_name} is showing repeated language around {topic.lower()}",
         f"The strongest new language this week centers on {keyword_text}, across {source_count} source(s).",
     )
 

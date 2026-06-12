@@ -15,6 +15,7 @@ from localsignal_engine.db.signals import (
     write_signals,
     write_weekly_report,
     link_evidence_chunks_to_signals,
+    hide_zero_evidence_signals,
     DEFAULT_REGION,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "write_signals",
     "write_weekly_report",
     "link_evidence_chunks_to_signals",
+    "hide_zero_evidence_signals",
     "DEFAULT_REGION",
 ]
