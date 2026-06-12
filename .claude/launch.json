@@ -7,6 +7,13 @@
       "runtimeArgs": ["compose", "logs", "-f", "web"],
       "port": 3000,
       "autoPort": false
+    },
+    {
+      "name": "localsignal-web-local",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/linyang1024/Documents/Codex/localsignal/apps/web",
+      "port": 3000
     }
   ]
 }
