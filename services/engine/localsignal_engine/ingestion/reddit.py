@@ -1,6 +1,8 @@
+import base64
 import logging
 import json
 import os
+import threading
 import time
 from typing import Optional
 import urllib.error
@@ -27,6 +29,12 @@ class RedditAdapter(IngestionAdapter):
         seen_urls: set[str] = set()
         query_count = 0
         rate_limited = False
+        if not _oauth_credentials():
+            logger.warning(
+                "Reddit credentials missing (REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET); "
+                "the public JSON endpoint is blocked (HTTP 403) from most hosts. "
+                "Register a 'script' app at https://www.reddit.com/prefs/apps to enable ingestion."
+            )
         for subreddit in self.subreddits:
             if rate_limited:
                 break
@@ -40,8 +48,10 @@ class RedditAdapter(IngestionAdapter):
                     return mentions
                 query = urllib.parse.quote(query_text)
                 time_window = os.getenv("REDDIT_TIME_WINDOW", "month")
+                base = _base_url()
+                suffix = "" if base.startswith("https://oauth") else ".json"
                 url = (
-                    f"https://www.reddit.com/r/{subreddit}/search.json"
+                    f"{base}/r/{subreddit}/search{suffix}"
                     f"?q={query}&restrict_sr=1&sort=new&t={time_window}&limit=25"
                 )
                 query_count += 1
@@ -183,13 +193,87 @@ def _tokens(value: str) -> list[str]:
     return [token for token in value.lower().replace("&", " ").split() if token]
 
 
+def _user_agent() -> str:
+    return os.getenv("REDDIT_USER_AGENT", "LocalSignalBot/0.1 by localsignal-mvp")
+
+
+def _oauth_credentials() -> Optional[tuple[str, str]]:
+    client_id = os.getenv("REDDIT_CLIENT_ID", "").strip()
+    client_secret = os.getenv("REDDIT_CLIENT_SECRET", "").strip()
+    if client_id and client_secret:
+        return client_id, client_secret
+    return None
+
+
+def _base_url() -> str:
+    # Reddit blocks the public www.reddit.com JSON endpoints from datacenter IPs
+    # (HTTP 403). With OAuth credentials we use oauth.reddit.com, which works.
+    return "https://oauth.reddit.com" if _oauth_credentials() else "https://www.reddit.com"
+
+
+_token_cache: dict = {"token": None, "expires_at": 0.0}
+_token_lock = threading.Lock()
+
+
+def _get_access_token() -> Optional[str]:
+    """Return a cached Reddit OAuth bearer token, fetching one if needed.
+
+    Uses the resource-owner password grant when REDDIT_USERNAME/PASSWORD are set
+    (script app), otherwise application-only client_credentials. Returns None when
+    no credentials are configured so callers fall back to the public endpoint.
+    """
+    creds = _oauth_credentials()
+    if not creds:
+        return None
+    now = time.time()
+    with _token_lock:
+        if _token_cache["token"] and now < _token_cache["expires_at"]:
+            return _token_cache["token"]
+        client_id, client_secret = creds
+        username = os.getenv("REDDIT_USERNAME", "").strip()
+        password = os.getenv("REDDIT_PASSWORD", "").strip()
+        if username and password:
+            form = {"grant_type": "password", "username": username, "password": password}
+        else:
+            form = {"grant_type": "client_credentials"}
+        auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        request = urllib.request.Request(
+            "https://www.reddit.com/api/v1/access_token",
+            data=urllib.parse.urlencode(form).encode(),
+            headers={
+                "Authorization": f"Basic {auth}",
+                "User-Agent": _user_agent(),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.HTTPError, OSError) as exc:
+            logger.warning("Reddit OAuth token request failed: %s", exc)
+            return None
+        token = payload.get("access_token")
+        if not token:
+            logger.warning("Reddit OAuth response had no access_token: %s", payload.get("error"))
+            return None
+        _token_cache["token"] = token
+        _token_cache["expires_at"] = now + float(payload.get("expires_in", 3600)) - 60
+        return token
+
+
 def _fetch_json(url: str) -> dict:
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "LocalSignalBot/0.1 by localsignal-mvp",
-            "Accept": "application/json",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        return json.loads(response.read().decode("utf-8"))
+    headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
+    token = _get_access_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # A stale/invalid token returns 401; drop it so the next call re-auths.
+        if exc.code == 401:
+            with _token_lock:
+                _token_cache["token"] = None
+                _token_cache["expires_at"] = 0.0
+        raise
