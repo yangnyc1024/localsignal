@@ -58,6 +58,11 @@ from .profiles import (
     upsert_place_profile,
     merge_place_profile,
 )
+from .handles import (
+    resolve_instagram_handles,
+    set_instagram_handle,
+    sanitize_instagram_handle,
+)
 
 __all__ = [
     "ensure_place_knowledge_schema",
@@ -79,6 +84,9 @@ __all__ = [
     "place_profile",
     "upsert_place_profile",
     "merge_place_profile",
+    "resolve_instagram_handles",
+    "set_instagram_handle",
+    "sanitize_instagram_handle",
     "_embed_texts",
     "_vector_literal",
     "_document_prompt_row",

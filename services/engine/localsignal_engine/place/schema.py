@@ -55,6 +55,7 @@ def _run_schema_ddl(conn) -> None:
         )
         """
     )
+    conn.execute("ALTER TABLE place_profiles ADD COLUMN IF NOT EXISTS instagram_handle TEXT NOT NULL DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_place_documents_place_type ON place_documents(place_id, content_type)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_place_documents_place_fetched ON place_documents(place_id, fetched_at DESC)")
     conn.execute(

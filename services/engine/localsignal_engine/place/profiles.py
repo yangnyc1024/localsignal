@@ -34,10 +34,11 @@ def upsert_place_profile(conn, place_id: str, profile: dict) -> None:
           occasions,
           caveats,
           source_count,
+          instagram_handle,
           profile,
           updated_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now())
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now())
         ON CONFLICT (place_id)
         DO UPDATE SET
           known_for = EXCLUDED.known_for,
@@ -47,6 +48,11 @@ def upsert_place_profile(conn, place_id: str, profile: dict) -> None:
           occasions = EXCLUDED.occasions,
           caveats = EXCLUDED.caveats,
           source_count = EXCLUDED.source_count,
+          -- Keep an existing handle if the new profile lacks one (signal merges omit it).
+          instagram_handle = CASE
+            WHEN EXCLUDED.instagram_handle <> '' THEN EXCLUDED.instagram_handle
+            ELSE place_profiles.instagram_handle
+          END,
           profile = EXCLUDED.profile,
           updated_at = now()
         """,
@@ -59,6 +65,7 @@ def upsert_place_profile(conn, place_id: str, profile: dict) -> None:
             _string_list(profile.get("occasions")),
             _clean_text(profile.get("caveats") or ""),
             int(profile.get("source_count") or 0),
+            _clean_text(profile.get("instagram_handle") or ""),
             Jsonb(_clean_json_value(profile)),
         ),
     )
