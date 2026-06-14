@@ -10,6 +10,7 @@ from localsignal_engine.ingestion.apify_social import fetch_apify_social_metadat
 from localsignal_engine.ingestion.base import IngestionAdapter
 from localsignal_engine.ingestion.google_news import GoogleNewsAdapter
 from localsignal_engine.ingestion.google_places import GooglePlacesAdapter
+from localsignal_engine.ingestion.instagram_profile import InstagramProfileAdapter
 from localsignal_engine.ingestion.local_json import LocalJsonAdapter
 from localsignal_engine.ingestion.reddit import RedditAdapter
 from localsignal_engine.ingestion.rss import RssAdapter
@@ -91,6 +92,10 @@ def _configured_adapters() -> list[IngestionAdapter]:
     yelp = YelpFusionAdapter.from_env()
     if yelp:
         adapters.append(yelp)
+
+    instagram_profile = InstagramProfileAdapter.from_env()
+    if instagram_profile:
+        adapters.append(instagram_profile)
 
     google_places = GooglePlacesAdapter.from_env()
     if google_places:

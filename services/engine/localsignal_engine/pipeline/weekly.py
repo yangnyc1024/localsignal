@@ -45,6 +45,7 @@ def run_once() -> None:
 
     places = load_places()
     try:
+        _resolve_instagram_handles(places)
         social_items, social_source_counts = fetch_social_metadata_items(places)
         (
             social_raw_count,
@@ -180,6 +181,28 @@ def _refresh_place_knowledge(signals) -> dict:
     except Exception as exc:
         metrics["error"] = str(exc)
     return metrics
+
+
+def _resolve_instagram_handles(places) -> dict:
+    """Populate place_profiles.instagram_handle for places that lack one.
+
+    Runs before ingestion so the Instagram profile adapter can use handles the
+    same week. Skips places that already have a handle, so steady-state cost is
+    near zero; the per-run cap spreads first-time resolution across runs.
+    """
+    if os.getenv("INSTAGRAM_PROFILE_ENABLED", "false").lower() != "true":
+        return {"enabled": False}
+    if not os.getenv("DATABASE_URL"):
+        return {"enabled": False, "reason": "missing_database_url"}
+    try:
+        from localsignal_engine.place import resolve_instagram_handles
+        with get_dict_conn() as conn:
+            metrics = resolve_instagram_handles(conn)
+        logger.info("Instagram handle resolution: %s", metrics)
+        return metrics
+    except Exception as exc:
+        logger.warning("Instagram handle resolution failed: %s", exc)
+        return {"enabled": True, "error": str(exc)}
 
 
 def _compute_baselines(places) -> int:
