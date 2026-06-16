@@ -27,11 +27,6 @@ export function WhatsMovingSection({ foodSignal, evidence }: Props) {
             {occasion ? (
               <div className="mt-1 text-sm leading-6 text-ink/60">{occasion}</div>
             ) : null}
-            {topEvidence[0]?.excerpt ? (
-              <p className="mt-3 border-t border-moss/15 pt-3 text-sm leading-6 text-ink/70">
-                &ldquo;{truncateEvidence(topEvidence[0].excerpt, 160)}&rdquo;
-              </p>
-            ) : null}
           </div>
         ) : null}
 

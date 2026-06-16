@@ -8,26 +8,26 @@ type Props = {
 };
 
 export function EvidenceSection({ evidence }: Props) {
+  // The top voices already appear in "What's moving"; this section is the
+  // remaining receipts. With nothing left to add, don't render an empty box.
+  if (!evidence.length) {
+    return null;
+  }
+
   return (
     <section className="rounded-lg border border-line bg-white/88 p-5 shadow-sm md:p-6">
       <details>
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
           <span className="flex items-center gap-2 text-sm font-semibold uppercase tracking-normal text-ink/60">
             <span className="text-moss"><Quote size={17} /></span>
-            Evidence
+            More evidence
           </span>
           <span className="rounded-md bg-paper px-2.5 py-1 text-xs font-semibold text-ink/55">
-            {evidence.length ? `${evidence.length} snippets` : "Building"}
+            {`${evidence.length} more`}
           </span>
         </summary>
         <div className="mt-4 grid gap-3">
-          {evidence.length ? (
-            evidence.map((item) => <EvidenceQuote key={`${item.platform}-${item.timestamp}-${item.excerpt}`} item={item} />)
-          ) : (
-            <p className="rounded-lg border border-line bg-paper p-4 text-sm leading-6 text-ink/66">
-              Evidence snippets are still being attached for this signal. Keep this in watching until source receipts are available.
-            </p>
-          )}
+          {evidence.map((item) => <EvidenceQuote key={`${item.platform}-${item.timestamp}-${item.excerpt}`} item={item} />)}
         </div>
       </details>
     </section>
