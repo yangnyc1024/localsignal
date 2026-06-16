@@ -61,7 +61,7 @@ The compliant automation path is acquisition outside LocalSignal, ingestion insi
 1. Use a platform-approved API, account-owned export, creator/business authorized export, or a third-party vendor whose terms allow metadata collection.
 2. Configure that job to write JSON or JSONL files into `data/social/inbox/`.
 3. Keep one record per public post/note/video with source URL, timestamp, visible text/OCR, place hints, engagement metrics, and collection audit fields.
-4. LocalSignal automatically scans `/data/social/inbox` during `run_evidence_ingestion` when `SOCIAL_JSON_DIR=/data/social/inbox`.
+4. LocalSignal automatically scans `/data/social/inbox` during `pipeline.evidence` when `SOCIAL_JSON_DIR=/data/social/inbox`.
 5. Ambiguous place matches remain review/unresolved and do not become published signals until supported by evidence.
 
 This keeps platform-specific collection separate from the signal engine, so we can swap manual exports, Apify/Bright Data-style exports, Make/Zapier jobs, or official APIs without changing signal detection.

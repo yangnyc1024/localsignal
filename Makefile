@@ -34,31 +34,31 @@ api:
 	cd services/api && ../../.venv/bin/uvicorn app.main:app --reload --port 8000
 
 engine:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_weekly
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.pipeline.weekly
 
 evidence-ingestion:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_evidence_ingestion
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.pipeline.evidence
 
 baseline-profiles:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_baseline_profiles
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.pipeline.baseline_profiles
 
 discover-places:
 	cd services/engine && ../../$(PYTHON) -m localsignal_engine.discover_places
 
 place-knowledge:
-	PYTHONPATH=services/engine $(PYTHON) -m localsignal_engine.run_place_knowledge --sync-evidence --google --website --restaurant-brief --embed
+	PYTHONPATH=services/engine $(PYTHON) -m localsignal_engine.pipeline.place_knowledge --sync-evidence --google --website --restaurant-brief --embed
 
 report:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.run_weekly
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.pipeline.weekly
 
 send-digest:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.send_digest
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.pipeline.send_digest
 
 send-test-email:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.send_test_email
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.pipeline.send_test_email
 
 scheduler:
-	cd services/engine && ../../$(PYTHON) -m localsignal_engine.scheduler
+	cd services/engine && ../../$(PYTHON) -m localsignal_engine.pipeline.scheduler
 
 web:
 	cd apps/web && npm run dev
@@ -67,23 +67,23 @@ validate-social:
 	PYTHONPATH=services/engine SOCIAL_JSON_PATHS="$(SOCIAL_JSON_PATHS)" $(PYTHON) -m localsignal_engine.validate_social_metadata
 
 apify-instagram-search:
-	set -a && source .env && PYTHONPATH=services/engine $(PYTHON) -m localsignal_engine.run_apify_instagram_search
+	set -a && source .env && PYTHONPATH=services/engine $(PYTHON) -m localsignal_engine.pipeline.apify_instagram
 
 # Docker-first pipeline commands. These use the same services/env as docker compose.
 docker-discover:
 	docker compose run --rm engine python -m localsignal_engine.discover_places
 
 docker-evidence:
-	docker compose run --rm -e REDDIT_SUBREDDITS= engine python -m localsignal_engine.run_evidence_ingestion
+	docker compose run --rm -e REDDIT_SUBREDDITS= engine python -m localsignal_engine.pipeline.evidence
 
 docker-place-knowledge:
-	docker compose run --rm engine python -m localsignal_engine.run_place_knowledge --sync-evidence --google --website --restaurant-brief --embed
+	docker compose run --rm engine python -m localsignal_engine.pipeline.place_knowledge --sync-evidence --google --website --restaurant-brief --embed
 
 docker-report:
-	docker compose run --rm -e SEND_DIGEST_ENABLED=false -e REDDIT_SUBREDDITS= engine python -m localsignal_engine.run_weekly
+	docker compose run --rm -e SEND_DIGEST_ENABLED=false -e REDDIT_SUBREDDITS= engine python -m localsignal_engine.pipeline.weekly
 
 docker-send-digest:
-	docker compose exec -T scheduler python -m localsignal_engine.send_digest
+	docker compose exec -T scheduler python -m localsignal_engine.pipeline.send_digest
 
 docker-shell:
 	docker compose exec api /bin/sh

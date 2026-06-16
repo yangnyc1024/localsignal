@@ -1,4 +1,4 @@
-import { ArrowRight, Database, FileText, HeartPulse, Newspaper } from "lucide-react";
+import { AlertTriangle, ArrowRight, Database, FileText, HeartPulse, Newspaper } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -13,6 +13,8 @@ export default async function AdminPage() {
   const resolvedEvidence = runs.reduce((sum, run) => sum + run.resolved_items, 0);
   const erroredRuns = runs.filter((run) => run.status.toLowerCase() === "error").length;
   const hasBriefing = Boolean(report?.briefing?.title && report.briefing?.why_it_matters);
+  const signalCount = report?.signals.length ?? 0;
+  const noSignals = signalCount === 0;
 
   return (
     <main className="min-h-screen">
@@ -30,8 +32,17 @@ export default async function AdminPage() {
           </p>
         </header>
 
+        {noSignals && (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
+            <div>
+              <span className="font-semibold">没有 signal 数据。</span> 请确认 <code className="rounded bg-amber-100 px-1 py-0.5 text-xs">WEEKLY_REPORT_ENABLED=true</code>，然后运行 <code className="rounded bg-amber-100 px-1 py-0.5 text-xs">make docker-report</code> 生成本周报告。
+            </div>
+          </div>
+        )}
+
         <section className="grid gap-3 md:grid-cols-4">
-          <Metric label="Published signals" value={report?.signals.length ?? 0} />
+          <Metric label="Published signals" value={signalCount} alert={noSignals} />
           <Metric label="Briefing ready" value={hasBriefing ? "Yes" : "No"} />
           <Metric label="Fresh evidence" value={freshEvidence} />
           <Metric label="Source errors" value={erroredRuns} />
@@ -74,11 +85,11 @@ export default async function AdminPage() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: number | string }) {
+function Metric({ label, value, alert }: { label: string; value: number | string; alert?: boolean }) {
   return (
-    <div className="rounded-lg border border-line bg-white/88 p-4 shadow-sm">
+    <div className={`rounded-lg border p-4 shadow-sm ${alert ? "border-amber-200 bg-amber-50" : "border-line bg-white/88"}`}>
       <div className="text-xs font-semibold uppercase text-ink/55">{label}</div>
-      <div className="mt-2 text-3xl font-semibold text-ink">{value}</div>
+      <div className={`mt-2 text-3xl font-semibold ${alert ? "text-amber-600" : "text-ink"}`}>{value}</div>
     </div>
   );
 }

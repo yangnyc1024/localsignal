@@ -41,6 +41,10 @@ export default async function SignalDetailPage({ params }: Props) {
   const reasons = whyChanged(signal);
   const chart = trendPoints(signal);
   const evidence = curatedEvidence(signal);
+  // Split so each snippet appears once: the top voices feature in "What's moving",
+  // the rest live under the collapsible "Evidence" receipts.
+  const recentVoices = evidence.slice(0, 3);
+  const moreEvidence = evidence.slice(3);
   const nearby = nearbyPlaces(signal);
   const foodSignal = signal.evidence.food_signal as FoodSignal | undefined;
 
@@ -75,7 +79,7 @@ export default async function SignalDetailPage({ params }: Props) {
 
         <AboutPlaceSection signal={signal} cuisine={cuisine} />
 
-        <WhatsMovingSection foodSignal={foodSignal} evidence={evidence} />
+        <WhatsMovingSection foodSignal={foodSignal} evidence={recentVoices} />
 
         <Section title="Why This Signal Happened" icon={<Sparkles size={17} />}>
           <div className="grid gap-3">
@@ -101,7 +105,7 @@ export default async function SignalDetailPage({ params }: Props) {
           </Section>
         </section>
 
-        <EvidenceSection evidence={evidence} />
+        <EvidenceSection evidence={moreEvidence} />
       </section>
     </main>
   );

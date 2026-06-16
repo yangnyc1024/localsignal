@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS signals (
 ALTER TABLE places ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE places ADD COLUMN IF NOT EXISTS google_place_id TEXT;
 ALTER TABLE places ADD COLUMN IF NOT EXISTS map_url TEXT;
+-- Cleaned product-facing name; places.name keeps the raw source value.
+ALTER TABLE places ADD COLUMN IF NOT EXISTS display_name TEXT;
 
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS slug TEXT;
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS short_summary TEXT;

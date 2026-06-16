@@ -5,18 +5,21 @@ from typing import Any, Optional
 from uuid import UUID
 
 import psycopg
+from localsignal_engine.db.connection import get_dict_conn
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from localsignal_engine.llm_text import (
+from localsignal_engine.llm import (
     BRIEFING_BANNED_WORDS,
     BRIEFING_SIGNALISH_PATTERNS,
     LlmEnrichmentError,
+    openai_responses_call,
     _clean_json_value,
     _natural_join,
     _normalize_slug,
     _sanitize_banned_words,
     _truncate_sentence,
+    find_banned_words,
 )
 
 
@@ -26,7 +29,7 @@ def generate_report_briefing(report_id: UUID, use_llm: Optional[bool] = None) ->
         raise RuntimeError("DATABASE_URL is required for briefing generation.")
 
     should_use_llm = bool(os.getenv("OPENAI_API_KEY")) if use_llm is None else use_llm
-    with psycopg.connect(database_url, row_factory=dict_row) as conn:
+    with get_dict_conn() as conn:
         metrics = _generate_report_briefing(conn, report_id, use_llm=should_use_llm)
         conn.commit()
         return metrics
@@ -49,7 +52,7 @@ def _report_signals(conn, report_id: UUID) -> list[dict]:
           s.confidence_reason,
           json_build_object(
             'id', p.id,
-            'name', p.name,
+            'name', COALESCE(NULLIF(p.display_name, ''), p.name),
             'category', p.category,
             'address', p.address,
             'neighborhood', p.neighborhood,
@@ -240,37 +243,15 @@ def _briefing_json_schema() -> dict[str, Any]:
 
 
 def _generate_briefing_json(prompt: dict[str, Any]) -> dict[str, Any]:
+    messages = [
+        {"role": "system", "content": "You are LocalSignal's local editor. Return JSON only."},
+        {"role": "user", "content": json.dumps(prompt, default=str)},
+    ]
+    json_schema = {"name": "localsignal_weekly_briefing", "schema": prompt["json_schema"]}
     try:
-        from openai import OpenAI, OpenAIError
-    except ImportError as exc:
-        raise LlmEnrichmentError("The openai package is not installed.") from exc
-
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    try:
-        response = client.responses.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-            input=[
-                {
-                    "role": "system",
-                    "content": "You are LocalSignal's local editor. Return JSON only.",
-                },
-                {"role": "user", "content": json.dumps(prompt, default=str)},
-            ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "localsignal_weekly_briefing",
-                    "schema": prompt["json_schema"],
-                    "strict": True,
-                }
-            },
-        )
-    except OpenAIError as exc:
-        raise LlmEnrichmentError(f"OpenAI briefing generation failed: {exc}") from exc
-
-    try:
-        return json.loads(response.output_text)
-    except (AttributeError, json.JSONDecodeError) as exc:
+        output = openai_responses_call(messages, json_schema=json_schema)
+        return json.loads(output)
+    except (json.JSONDecodeError, AttributeError) as exc:
         raise LlmEnrichmentError("OpenAI briefing did not return valid JSON.") from exc
 
 
@@ -310,7 +291,7 @@ def _validate_public_language(briefing: dict[str, Any]) -> None:
             " ".join(str(item.get("detail") or "") for item in briefing.get("sources") or []),
         ]
     ).lower()
-    hits = sorted(word for word in BRIEFING_BANNED_WORDS if word in public_text)
+    hits = find_banned_words(public_text, BRIEFING_BANNED_WORDS)
     if hits:
         _sanitize_banned_words(briefing, hits)
 

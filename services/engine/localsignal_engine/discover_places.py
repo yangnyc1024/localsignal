@@ -1,3 +1,4 @@
+import logging
 import json
 import os
 import time
@@ -5,6 +6,8 @@ import urllib.parse
 import urllib.request
 
 from localsignal_engine.db import upsert_places_from_discovery
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -52,9 +55,9 @@ def main() -> None:
 
     discovered = _discover(api_key)
     written = upsert_places_from_discovery(discovered)
-    print(f"Discovered {len(discovered)} candidate place(s); upserted {written} place row(s).")
+    logger.info(f"Discovered {len(discovered)} candidate place(s); upserted {written} place row(s).")
     for place in discovered[:60]:
-        print(f"{place['city']} | {place['category']:<24} | {place['name']} | {place.get('address') or ''}")
+        logger.info(f"{place['city']} | {place['category']:<24} | {place['name']} | {place.get('address') or ''}")
 
 
 def _discover(api_key: str) -> list[dict]:
@@ -65,7 +68,7 @@ def _discover(api_key: str) -> list[dict]:
         for category, query_suffix in QUERIES:
             done += 1
             query = f"{query_suffix} in {city} NJ"
-            print(f"[{done}/{total_queries}] {query}")
+            logger.info(f"[{done}/{total_queries}] {query}")
             for result in _search(api_key, query):
                 google_place_id = result.get("place_id")
                 if not google_place_id or google_place_id in by_google_id:
@@ -106,7 +109,7 @@ def _search(api_key: str, query: str) -> list[dict]:
         if status == "ZERO_RESULTS":
             break
         if status != "OK":
-            print(f"  ⚠ Google Places query failed [{status}]: {payload.get('error_message', '')}")
+            logger.warning(f"  ⚠ Google Places query failed [{status}]: {payload.get('error_message', '')}")
             break
 
         page_results = [

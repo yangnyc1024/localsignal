@@ -1,3 +1,4 @@
+import logging
 import json
 import os
 import re
@@ -9,6 +10,8 @@ from typing import Optional
 
 from localsignal_engine.ingestion.base import IngestionAdapter
 from localsignal_engine.models import Mention, Place
+
+logger = logging.getLogger(__name__)
 
 
 class GooglePlacesAdapter(IngestionAdapter):
@@ -71,7 +74,7 @@ class GooglePlacesAdapter(IngestionAdapter):
         try:
             payload = self._fetch(url)
         except OSError as exc:
-            print(f"Google Places search failed for {place.name}: {exc}", flush=True)
+            logger.warning(f"Google Places search failed for {place.name}: {exc}")
             return None
         return next(iter(payload.get("results", [])), None)
 
@@ -89,7 +92,7 @@ class GooglePlacesAdapter(IngestionAdapter):
         try:
             payload = self._fetch(url)
         except OSError as exc:
-            print(f"Google Places details failed for {place.name}: {exc}", flush=True)
+            logger.warning(f"Google Places details failed for {place.name}: {exc}")
             return []
 
         result = payload.get("result", {})

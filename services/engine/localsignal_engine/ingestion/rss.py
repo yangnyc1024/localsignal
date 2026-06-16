@@ -1,3 +1,4 @@
+import logging
 import email.utils
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -6,6 +7,8 @@ from datetime import datetime, timezone
 from localsignal_engine.ingestion.base import IngestionAdapter
 from localsignal_engine.ingestion.matching import matching_places
 from localsignal_engine.models import Mention, Place
+
+logger = logging.getLogger(__name__)
 
 
 class RssAdapter(IngestionAdapter):
@@ -21,7 +24,7 @@ class RssAdapter(IngestionAdapter):
             try:
                 body = _fetch(feed_url)
             except OSError as exc:
-                print(f"RSS fetch failed for {feed_url}: {exc}", flush=True)
+                logger.warning(f"RSS fetch failed for {feed_url}: {exc}")
                 continue
 
             mentions.extend(_parse_feed(body, feed_url, places, self.source))

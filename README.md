@@ -297,7 +297,7 @@ For a one-off Reddit run during testing, set `REDDIT_FORCE_RUN=true` temporarily
 
 ## ML Engine
 
-Weekly report generation now uses `localsignal_engine.ml_engine` instead of only static rules.
+Weekly report generation now uses `localsignal_engine.signal.scoring` instead of only static rules.
 
 It compares a current window against a baseline window:
 

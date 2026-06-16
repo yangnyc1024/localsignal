@@ -1,11 +1,14 @@
+import logging
 import os
 
 import psycopg
+from localsignal_engine.db.connection import get_conn, get_dict_conn
 from psycopg.rows import dict_row
 
 from localsignal_engine.baseline import compute_baseline_profiles
 from localsignal_engine.db import (
     finish_ingestion_run,
+    hide_zero_evidence_signals,
     link_evidence_chunks_to_signals,
     load_places,
     load_recent_mentions,
@@ -15,18 +18,22 @@ from localsignal_engine.db import (
     write_social_metadata_items,
     write_weekly_report,
 )
-from localsignal_engine.email import send_latest_digest
+from localsignal_engine.email.send import send_latest_digest
 from localsignal_engine.ingestion.live import fetch_live_mentions, fetch_social_metadata_items
-from localsignal_engine.llm import enrich_report_signals_with_llm
-from localsignal_engine.ml_engine import generate_report_signals
-from localsignal_engine.place_knowledge import (
+from localsignal_engine.signal.enrichment import enrich_report_signals_with_llm
+from localsignal_engine.signal.scoring import generate_report_signals
+from localsignal_engine.logging_config import configure_logging
+from localsignal_engine.place import (
     build_place_profiles_from_briefs,
     build_restaurant_brief_documents,
     embed_place_documents,
+    ingest_apify_google_reviews,
     ingest_google_place_documents,
     ingest_website_documents,
     sync_existing_evidence_documents,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def run_once() -> None:
@@ -38,6 +45,7 @@ def run_once() -> None:
 
     places = load_places()
     try:
+        _resolve_instagram_handles(places)
         social_items, social_source_counts = fetch_social_metadata_items(places)
         (
             social_raw_count,
@@ -67,7 +75,10 @@ def run_once() -> None:
             raise RuntimeError("No signals generated from live ingestion.")
 
         report_id = write_weekly_report(signals)
-        linked_count = link_evidence_chunks_to_signals()
+        linked_count = link_evidence_chunks_to_signals(report_id=report_id)
+        hidden_count = hide_zero_evidence_signals(report_id)
+        if hidden_count:
+            logger.warning("Hid %d report signals with no linked evidence.", hidden_count)
         place_knowledge_metrics = (
             _refresh_place_knowledge(signals) if _place_knowledge_weekly_enabled() else {"enabled": False}
         )
@@ -82,14 +93,15 @@ def run_once() -> None:
             signals_generated=signals_generated,
             report_id=report_id,
         )
-        print(
-            f"Wrote report {report_id}, stored {written_count} live mentions, {raw_count} raw source items, "
-            f"{chunk_count} evidence chunks, imported {social_raw_count} social raw items, "
-            f"{social_mentions_count} social mentions, {social_chunk_count} social evidence chunks, "
-            f"{social_review_count} social review items, {social_unresolved_count} unresolved social items, "
-            f"linked {linked_count} evidence rows, updated {baseline_count} baselines, "
-            f"place knowledge {place_knowledge_metrics}, LLM enrichment {llm_metrics}, "
-            f"and queued {delivery_count} digest deliveries."
+        logger.info(
+            "Wrote report %s: %d live mentions, %d raw items, %d chunks, "
+            "%d social raw, %d social mentions, %d social chunks, "
+            "%d review items, %d unresolved, %d evidence links, "
+            "%d baselines updated; place_knowledge=%s llm=%s deliveries=%d",
+            report_id, written_count, raw_count, chunk_count,
+            social_raw_count, social_mentions_count, social_chunk_count,
+            social_review_count, social_unresolved_count, linked_count,
+            baseline_count, place_knowledge_metrics, llm_metrics, delivery_count,
         )
     except Exception as exc:
         finish_ingestion_run(
@@ -128,6 +140,10 @@ def _place_knowledge_weekly_enabled() -> bool:
     return os.getenv("PLACE_KNOWLEDGE_WEEKLY_ENABLED", "true").lower() == "true"
 
 
+def _place_knowledge_apify_reviews_enabled() -> bool:
+    return bool(os.getenv("APIFY_TOKEN")) and os.getenv("PLACE_KNOWLEDGE_APIFY_REVIEWS_ENABLED", "true").lower() == "true"
+
+
 def _place_knowledge_google_enabled() -> bool:
     return os.getenv("PLACE_KNOWLEDGE_GOOGLE_ENABLED", "true").lower() == "true"
 
@@ -150,10 +166,12 @@ def _refresh_place_knowledge(signals) -> dict:
 
     metrics: dict[str, object] = {"enabled": True, "places": len(place_ids)}
     try:
-        with psycopg.connect(database_url, row_factory=dict_row) as conn:
+        with get_dict_conn() as conn:
             metrics["evidence_documents"] = sync_existing_evidence_documents(conn, place_ids)
             if _place_knowledge_google_enabled():
                 metrics["google_documents"] = ingest_google_place_documents(conn, place_ids)
+            if _place_knowledge_apify_reviews_enabled():
+                metrics["apify_review_documents"] = ingest_apify_google_reviews(conn, place_ids)
             if _place_knowledge_website_enabled():
                 metrics["website_documents"] = ingest_website_documents(conn, place_ids)
             metrics["restaurant_brief_documents"] = build_restaurant_brief_documents(conn, place_ids)
@@ -165,15 +183,38 @@ def _refresh_place_knowledge(signals) -> dict:
     return metrics
 
 
+def _resolve_instagram_handles(places) -> dict:
+    """Populate place_profiles.instagram_handle for places that lack one.
+
+    Runs before ingestion so the Instagram profile adapter can use handles the
+    same week. Skips places that already have a handle, so steady-state cost is
+    near zero; the per-run cap spreads first-time resolution across runs.
+    """
+    if os.getenv("INSTAGRAM_PROFILE_ENABLED", "false").lower() != "true":
+        return {"enabled": False}
+    if not os.getenv("DATABASE_URL"):
+        return {"enabled": False, "reason": "missing_database_url"}
+    try:
+        from localsignal_engine.place import resolve_instagram_handles
+        with get_dict_conn() as conn:
+            metrics = resolve_instagram_handles(conn)
+        logger.info("Instagram handle resolution: %s", metrics)
+        return metrics
+    except Exception as exc:
+        logger.warning("Instagram handle resolution failed: %s", exc)
+        return {"enabled": True, "error": str(exc)}
+
+
 def _compute_baselines(places) -> int:
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         return 0
-    with psycopg.connect(database_url) as conn:
+    with get_conn() as conn:
         return compute_baseline_profiles(conn, places)
 
 
 def main() -> None:
+    configure_logging()
     run_once()
 
 

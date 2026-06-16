@@ -1,3 +1,4 @@
+import logging
 import json
 import os
 import time
@@ -7,6 +8,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from localsignal_engine.db import record_social_source_run
+
+logger = logging.getLogger(__name__)
 
 
 ACTOR_ID = "apify~instagram-scraper"
@@ -86,11 +89,11 @@ def main() -> None:
             "onlyPostsNewerThan": newer_than,
         }
         run = _start_run(token, actor_input, max_charge)
-        print(f"started Instagram place-post run {run['id']} for {len(unique_urls)} location URL(s)", flush=True)
+        logger.info(f"started Instagram place-post run {run['id']} for {len(unique_urls)} location URL(s)")
         finished = _wait_for_run(token, run["id"])
         status = finished.get("status")
         dataset_id = finished.get("defaultDatasetId")
-        print(f"Instagram place-post run {run['id']} finished with {status}; dataset={dataset_id}", flush=True)
+        logger.info(f"Instagram place-post run {run['id']} finished with {status}; dataset={dataset_id}")
         if status == "SUCCEEDED" and dataset_id:
             _record_search_run(
                 search_type="place-post",
@@ -124,9 +127,9 @@ def main() -> None:
 
     if dataset_ids:
         _merge_env_dataset_ids(dataset_ids)
-        print("APIFY_SOCIAL_DATASET_IDS updated with: " + ",".join(dataset_ids), flush=True)
+        logger.info("APIFY_SOCIAL_DATASET_IDS updated with: " + ",".join(dataset_ids))
     else:
-        print("No successful Instagram search datasets were produced.", flush=True)
+        logger.info("No successful Instagram search datasets were produced.")
 
 
 def _run_search(
@@ -148,11 +151,11 @@ def _run_search(
         "onlyPostsNewerThan": newer_than,
     }
     run = _start_run(token, actor_input, max_charge)
-    print(f"started Instagram {search_type} search run {run['id']} for {query!r}", flush=True)
+    logger.info(f"started Instagram {search_type} search run {run['id']} for {query!r}")
     finished = _wait_for_run(token, run["id"])
     status = finished.get("status")
     dataset_id = finished.get("defaultDatasetId")
-    print(f"Instagram {search_type} search run {run['id']} finished with {status}; dataset={dataset_id}", flush=True)
+    logger.info(f"Instagram {search_type} search run {run['id']} finished with {status}; dataset={dataset_id}")
     if status != "SUCCEEDED" or not dataset_id:
         _record_search_run(
             search_type=search_type,
@@ -253,11 +256,13 @@ def _record_search_run(
             error=error,
         )
     except Exception as exc:
-        print(f"apify search run logging failed: {exc}", flush=True)
+        logger.warning(f"apify search run logging failed: {exc}")
 
 
 def _merge_env_dataset_ids(dataset_ids: list[str]) -> None:
-    env_path = Path(".env")
+    # Prefer the path set via ENV_FILE env var (host-mounted .env), then fall back to CWD.
+    env_file = os.getenv("ENV_FILE", "").strip()
+    env_path = Path(env_file) if env_file else Path(".env")
     existing_text = env_path.read_text() if env_path.exists() else ""
     current: list[str] = []
     lines = existing_text.splitlines()

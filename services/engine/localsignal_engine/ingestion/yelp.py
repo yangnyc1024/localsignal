@@ -1,3 +1,4 @@
+import logging
 import json
 import os
 import urllib.parse
@@ -6,6 +7,8 @@ from datetime import datetime, timezone
 
 from localsignal_engine.ingestion.base import IngestionAdapter
 from localsignal_engine.models import Mention, Place
+
+logger = logging.getLogger(__name__)
 
 
 class YelpFusionAdapter(IngestionAdapter):
@@ -27,7 +30,7 @@ class YelpFusionAdapter(IngestionAdapter):
             try:
                 payload = self._fetch(url)
             except OSError as exc:
-                print(f"Yelp fetch failed for {place.name}: {exc}", flush=True)
+                logger.warning(f"Yelp fetch failed for {place.name}: {exc}")
                 continue
 
             for business in payload.get("businesses", []):

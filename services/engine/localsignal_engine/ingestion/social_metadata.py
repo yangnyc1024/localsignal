@@ -152,15 +152,19 @@ def _best_token_match(text: str, places: list[Place]) -> Optional[tuple[Place, f
         return None
     tokens = set(_tokens(text))
     best: Optional[tuple[Place, float]] = None
+    stopwords = {"the", "and", "bbq", "cafe", "coffee", "company", "house", "bar", "grill", "kitchen", "bistro"}
     for place in places:
-        name_tokens = [token for token in _tokens(place.name) if token not in {"the", "and", "bbq", "cafe", "coffee", "company", "house"}]
+        name_tokens = [token for token in _tokens(place.name) if token not in stopwords]
         if not name_tokens:
             continue
         overlap = sum(1 for token in name_tokens if token in tokens)
         if overlap < min(2, len(name_tokens)):
             continue
-        area_bonus = 0.08 if place.city.lower() in text or (place.neighborhood and place.neighborhood.lower() in text) else 0
-        confidence = min(0.82, 0.55 + (overlap / len(name_tokens) * 0.2) + area_bonus)
+        area_bonus = 0.1 if place.city.lower() in text or (place.neighborhood and place.neighborhood.lower() in text) else 0
+        # Hashtag bonus: Instagram posts often have #PlaceName hashtags
+        hashtag_text = text.replace("#", " ").replace("_", " ")
+        hashtag_bonus = 0.08 if place.name.lower().replace(" ", "") in hashtag_text.replace(" ", "") else 0
+        confidence = min(0.92, 0.60 + (overlap / len(name_tokens) * 0.25) + area_bonus + hashtag_bonus)
         if not best or confidence > best[1]:
             best = (place, confidence)
     return best

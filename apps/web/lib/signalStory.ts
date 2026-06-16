@@ -1,19 +1,22 @@
 import type { Signal } from "@/lib/types";
 
 /**
- * Return a display-friendly place name, stripping CJK characters and
- * truncating overly long Google Places names.
+ * Display-friendly place name. Mirrors the engine's place.names cleaning:
+ * drop marketing payloads ("| All You Can EAT", " - Cajun Seafood ...") but
+ * keep CJK characters — they are meaningful to the local audience.
+ * Canonical cleaning lives server-side in places.display_name; this guards
+ * older data that predates that column.
  */
 export function displayPlaceName(name: string, maxLen = 40): string {
-  // Extract Latin/ASCII portion (strip Korean, Chinese, Japanese characters)
-  let latin = name.replace(/[ᄀ-ᇿ㄰-㆏가-힯一-鿿぀-ヿ]+/g, "").trim();
-  // Unwrap if parens contain the whole remaining string
-  latin = latin.replace(/^\s*\(\s*(.*?)\s*\)\s*$/, "$1").trim();
-  // Remove trailing punctuation artifacts
-  latin = latin.replace(/^[|/\-,\s]+|[|/\-,\s]+$/g, "").trim();
-  const cleaned = latin || name;
+  let cleaned = name.replace(/[\u0000-\u001f]/g, " ").split("|")[0];
+  const head = cleaned.split(/\s+[-–—/]\s+/)[0].trim();
+  if (head.length >= 6) cleaned = head;
+  cleaned =
+    cleaned
+      .replace(/\s+/g, " ")
+      .replace(/^[\s\-–—/,|]+|[\s\-–—/,|]+$/g, "")
+      .trim() || name.trim();
   if (cleaned.length <= maxLen) return cleaned;
-  // Truncate at a word boundary, strip descriptor after " - " or " | "
   const cutAt = cleaned.search(/ [-|/] /);
   if (cutAt > 8 && cutAt <= maxLen) return cleaned.slice(0, cutAt).trim();
   return cleaned.slice(0, maxLen).trimEnd() + "…";

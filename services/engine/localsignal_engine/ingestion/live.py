@@ -1,19 +1,24 @@
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg
+from localsignal_engine.db.connection import get_conn
 
 from localsignal_engine.ingestion.apify_social import fetch_apify_social_metadata_items
 from localsignal_engine.ingestion.base import IngestionAdapter
 from localsignal_engine.ingestion.google_news import GoogleNewsAdapter
 from localsignal_engine.ingestion.google_places import GooglePlacesAdapter
+from localsignal_engine.ingestion.instagram_profile import InstagramProfileAdapter
 from localsignal_engine.ingestion.local_json import LocalJsonAdapter
 from localsignal_engine.ingestion.reddit import RedditAdapter
 from localsignal_engine.ingestion.rss import RssAdapter
 from localsignal_engine.ingestion.social_metadata import SocialMetadataItem, load_social_metadata_items
 from localsignal_engine.ingestion.yelp import YelpFusionAdapter
 from localsignal_engine.models import Mention, Place
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_live_mentions(places: list[Place]) -> tuple[list[Mention], dict[str, int]]:
@@ -23,7 +28,7 @@ def fetch_live_mentions(places: list[Place]) -> tuple[list[Mention], dict[str, i
 
     for adapter in adapters:
         fetched = adapter.fetch_mentions(places)
-        print(f"{adapter.source} produced {len(fetched)} mentions.", flush=True)
+        logger.info(f"{adapter.source} produced {len(fetched)} mentions.")
         source_counts[adapter.source] = len(fetched)
         mentions.extend(fetched)
 
@@ -43,7 +48,7 @@ def fetch_social_metadata_items(places: list[Place]) -> tuple[list[SocialMetadat
         fetched_for_source: list[SocialMetadataItem] = []
         for path in _paths(raw_paths):
             fetched = load_social_metadata_items(path, source, places)
-            print(f"{source} metadata from {path} produced {len(fetched)} raw item(s).", flush=True)
+            logger.info(f"{source} metadata from {path} produced {len(fetched)} raw item(s).")
             fetched_for_source.extend(fetched)
         if fetched_for_source:
             source_counts[source] = len(fetched_for_source)
@@ -80,13 +85,17 @@ def _configured_adapters() -> list[IngestionAdapter]:
         if _source_due("reddit", int(os.getenv("REDDIT_INTERVAL_SECONDS", "604800"))):
             adapters.append(RedditAdapter(subreddits))
         else:
-            print("Reddit ingestion is enabled but not due yet; set REDDIT_FORCE_RUN=true to override.", flush=True)
+            logger.info("Reddit ingestion is enabled but not due yet; set REDDIT_FORCE_RUN=true to override.")
     elif subreddits and not reddit_enabled:
-        print("Reddit ingestion is configured but disabled; set REDDIT_ENABLED=true to fetch Reddit.", flush=True)
+        logger.info("Reddit ingestion is configured but disabled; set REDDIT_ENABLED=true to fetch Reddit.")
 
     yelp = YelpFusionAdapter.from_env()
     if yelp:
         adapters.append(yelp)
+
+    instagram_profile = InstagramProfileAdapter.from_env()
+    if instagram_profile:
+        adapters.append(instagram_profile)
 
     google_places = GooglePlacesAdapter.from_env()
     if google_places:
@@ -104,7 +113,7 @@ def _source_due(provider: str, interval_seconds: int) -> bool:
     if not database_url:
         return True
     try:
-        with psycopg.connect(database_url) as conn:
+        with get_conn() as conn:
             row = conn.execute(
                 """
                 SELECT finished_at
@@ -116,7 +125,7 @@ def _source_due(provider: str, interval_seconds: int) -> bool:
                 (provider,),
             ).fetchone()
     except Exception as exc:
-        print(f"{provider} cadence check failed; running source anyway: {exc}", flush=True)
+        logger.warning(f"{provider} cadence check failed; running source anyway: {exc}")
         return True
     if not row or not row[0]:
         return True
@@ -140,7 +149,7 @@ def _fetch_social_inbox_items(places: list[Place]) -> tuple[list[SocialMetadataI
 
     root = Path(directory)
     if not root.exists():
-        print(f"social inbox directory does not exist: {directory}", flush=True)
+        logger.info(f"social inbox directory does not exist: {directory}")
         return [], {}
 
     items: list[SocialMetadataItem] = []
@@ -149,7 +158,7 @@ def _fetch_social_inbox_items(places: list[Place]) -> tuple[list[SocialMetadataI
         if path.suffix.lower() not in {".json", ".jsonl"}:
             continue
         fetched = load_social_metadata_items(str(path), "social_metadata", places)
-        print(f"social inbox file {path} produced {len(fetched)} raw item(s).", flush=True)
+        logger.info(f"social inbox file {path} produced {len(fetched)} raw item(s).")
         items.extend(fetched)
         for item in fetched:
             source_counts[item.platform] = source_counts.get(item.platform, 0) + 1

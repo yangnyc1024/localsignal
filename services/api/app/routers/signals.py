@@ -48,7 +48,7 @@ _SIGNAL_SELECT = """
       ) AS place_profile,
       json_build_object(
         'id', p.id,
-        'name', p.name,
+        'name', COALESCE(NULLIF(p.display_name, ''), p.name),
         'address', p.address,
         'category', p.category,
         'city', p.city,
@@ -136,7 +136,7 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
           ) AS baseline_context,
           json_build_object(
             'id', p.id,
-            'name', p.name,
+            'name', COALESCE(NULLIF(p.display_name, ''), p.name),
             'address', p.address,
             'category', p.category,
             'city', p.city,
@@ -246,7 +246,7 @@ def signal_detail(slug: str, conn=Depends(get_connection)) -> dict:
           rsig.signal_type,
           rsig.score::float AS score,
           json_build_object(
-            'name', rp.name,
+            'name', COALESCE(NULLIF(rp.display_name, ''), rp.name),
             'neighborhood', rp.neighborhood,
             'category', rp.category
           ) AS place
